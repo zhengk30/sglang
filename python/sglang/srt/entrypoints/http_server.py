@@ -1113,32 +1113,35 @@ def _execute_server_warmup(
 
         else:
             logger.info(f"Start of pd disaggregation warmup ...")
-            json_data = {
-                "sampling_params": {
-                    "temperature": 0.0,
-                    "max_new_tokens": 8,
-                    "ignore_eos": True,
-                },
-                "bootstrap_host": [FAKE_BOOTSTRAP_HOST] * server_args.dp_size,
-                # This is a hack to ensure fake transfer is enabled during prefill warmup
-                # ensure each dp rank has a unique bootstrap_room during prefill warmup
-                "bootstrap_room": [
-                    i * (2**63 // server_args.dp_size) + (i % server_args.tp_size)
-                    for i in range(server_args.dp_size)
-                ],
-                "input_ids": [[0, 1, 2, 3]] * server_args.dp_size,
-            }
-            res = requests.post(
-                url + request_name,
-                json=json_data,
-                headers=headers,
-                timeout=1800,  # because of deep gemm precache is very long if not precache.
-            )
-            if res.status_code == 200:
-                logger.info(
-                    f"End of prefill disaggregation mode warmup with status {res.status_code}, resp: {res.json()}"
+
+            if server_args.disaggregation_mode == "encode":
+                # TODO
+                pass
+            else:
+                json_data = {
+                    "sampling_params": {
+                        "temperature": 0.0,
+                        "max_new_tokens": 8,
+                        "ignore_eos": True,
+                    },
+                    "bootstrap_host": [FAKE_BOOTSTRAP_HOST] * server_args.dp_size,
+                    # This is a hack to ensure fake transfer is enabled during prefill warmup
+                    # ensure each dp rank has a unique bootstrap_room during prefill warmup
+                    "bootstrap_room": [
+                        i * (2**63 // server_args.dp_size) + (i % server_args.tp_size)
+                        for i in range(server_args.dp_size)
+                    ],
+                    "input_ids": [[0, 1, 2, 3]] * server_args.dp_size,
+                }
+                res = requests.post(
+                    url + request_name,
+                    json=json_data,
+                    headers=headers,
+                    timeout=1800,  # because of deep gemm precache is very long if not precache.
                 )
-                _global_state.tokenizer_manager.server_status = ServerStatus.Up
+                if res.status_code == 200:logger.info(
+                    f"End of prefill disaggregation modewarmup with status {res.status_code}, resp: {res.json()}"
+                )_global_state.tokenizer_manager.server_status = ServerStatus.Up
             else:
                 logger.info(
                     "Prefill disaggregation mode warm Up Failed, status code: {}".format(
