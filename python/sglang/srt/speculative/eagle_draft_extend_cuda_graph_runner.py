@@ -256,7 +256,7 @@ class EAGLEDraftExtendCudaGraphRunner:
             req_pool_indices=req_pool_indices,
             seq_lens=seq_lens,
             next_token_logits_buffer=next_token_logits_buffer,
-            req_to_token_pool=self.model_runner.req_to_token_pool,
+            req_to_token_pool=self.model_runner.mm_embedding_pool,
             token_to_kv_pool=self.model_runner.mm_embedding_pool,
             out_cache_loc=out_cache_loc,
             seq_lens_sum=seq_lens.sum().item(),

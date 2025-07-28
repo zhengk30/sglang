@@ -90,7 +90,7 @@ from sglang.srt.mem_cache.memory_pool import (
     ReqToTokenPool,
     SWAKVPool,
 )
-from sglang.srt.mem_cache.multimodal_cache import PagedMultiModalCache
+from sglang.srt.mem_cache.multimodal_cache import PagedMultiModalEmbeddingPool
 from sglang.srt.model_executor.cuda_graph_runner import CudaGraphRunner
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
 from sglang.srt.model_loader import get_model
@@ -172,7 +172,7 @@ class ModelRunner:
         is_draft_worker: bool = False,
         req_to_token_pool: Optional[ReqToTokenPool] = None,
         token_to_kv_pool_allocator: Optional[BaseTokenToKVPoolAllocator] = None,
-        mm_item_to_token_pool: Optional[PagedMultiModalCache] = None,
+        mm_item_to_token_pool: Optional[PagedMultiModalEmbeddingPool] = None,
         mm_embedding_allocator: Optional[BaseTokenToKVPoolAllocator] = None,
     ):
         # Parse args
@@ -203,11 +203,23 @@ class ModelRunner:
             server_args.speculative_algorithm
         )
         self.page_size = server_args.page_size
-        self.req_to_token_pool = req_to_token_pool
-        self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
 
-        self.mm_item_to_token_pool = mm_item_to_token_pool
-        self.mm_embedding_allocator = mm_embedding_allocator
+        if self.server_args.disaggregation_mode == "encode":
+            self.req_to_token_pool = None
+            self.token_to_kv_pool_allocator = None
+        else:
+            self.req_to_token_pool = req_to_token_pool
+            self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
+
+        if (
+            self.server_args.disaggregation_mode == "prefill"
+            and self.is_encoder_disaggregated()
+        ):
+            self.mm_item_to_token_pool = mm_item_to_token_pool
+            self.mm_embedding_allocator = mm_embedding_allocator
+        else:
+            self.mm_item_to_token_pool = None
+            self.mm_embedding_allocator = None
 
         self.is_hybrid = model_config.is_hybrid
         self.use_mla_backend = self.model_config.attention_arch == AttentionArch.MLA
@@ -339,27 +351,31 @@ class ModelRunner:
             self.init_lora_manager()
 
         # Init memory pool and attention backends
-        self.init_memory_pool(
-            min_per_gpu_memory,
-            server_args.max_running_requests,
-            server_args.max_total_tokens,
-        )
+        if self.server_args.disaggregation_mode != "encode":
+            self.init_memory_pool(
+                min_per_gpu_memory,
+                server_args.max_running_requests,
+                server_args.max_total_tokens,
+            )
 
         # Init memory pool for mm embedding (only allocated in PDE-disaggregation)
-        self.init_mm_memory_pool(
-            min_per_gpu_memory,
-            server_args.max_running_requests,
-            server_args.max_total_tokens,
-        )
+        # TODO: and there's an encoder
+        if self.server_args.disaggregation_mode == "prefill":
+            self.init_mm_memory_pool(
+                min_per_gpu_memory,
+                server_args.max_running_requests,
+                server_args.max_total_tokens,
+            )
 
-        if self.device == "cuda":
-            self.init_cublas()
+        if self.server_args.disaggregation_mode != "encode":
             self.init_attention_backend()
+            self.cuda_graph_runner = None
+        elif self.device == "cuda":
+            self.init_cublas()
             self.init_cuda_graphs()
         else:
             self.cuda_graph_runner = None
             self.cuda_graph_mem_usage = 0
-            self.init_attention_backend()
 
         # auxiliary hidden capture mode. TODO: expose this to server args?
         if self.spec_algorithm.is_eagle3() and not self.is_draft_worker:
@@ -383,6 +399,10 @@ class ModelRunner:
                 eagle_aux_hidden_state_layer_ids = None
 
             self.model.set_eagle3_layers_to_capture(eagle_aux_hidden_state_layer_ids)
+
+    def is_encoder_disaggregated(self) -> bool:
+        # FIXME
+        return True
 
     def model_specific_adjustment(self):
         server_args = self.server_args
@@ -416,7 +436,10 @@ class ModelRunner:
                     f"{server_args.attention_backend}. Please set it to 'dual_chunk_flash_attn'."
                 )
 
-        if server_args.attention_backend is None:
+        if (
+            server_args.attention_backend is None
+            and server_args.disaggregation_mode != "encode"
+        ):
             """
             Auto select the fastest attention backend.
 
@@ -1175,8 +1198,16 @@ class ModelRunner:
         max_num_reqs: Optional[int] = None,
         max_total_tokens: Optional[int] = None,
     ):
-        # TODO: consider gpu mem usage from normal memory pool
-        pass
+        # TODO: consider gpu mem usage from normal memory pool when deciding appropriate size
+        if self.server_args.disaggregation_mode == "encode":
+            MM_PAGE_SIZE = 200
+            # self.req_to_token_pool = PagedMultiModalCache(
+            #     size=max_num_reqs,
+            #     hidden_size=self.model_config.vision_config.hidden_size,
+            #     dtype =
+            #     page_size=MM_PAGE_SIZE,
+            #     device=self.device,
+            # )
 
     def init_memory_pool(
         self,
@@ -1201,6 +1232,7 @@ class ModelRunner:
                 f"Unsupported kv_cache_dtype: {self.server_args.kv_cache_dtype}."
             )
 
+        # TODO: leave some space for mm embeddings on prefill rank
         self.max_total_num_tokens = self.profile_max_num_token(total_gpu_memory)
 
         if max_num_reqs is None:
