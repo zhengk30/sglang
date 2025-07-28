@@ -34,7 +34,7 @@ class MultimodalCache(abc.ABC):
     @abc.abstractmethod
     def get_mm_embedding(self, mm_hash: int) -> torch.Tensor:
         """
-            Extract the embedding with a hash id. the returned tensor may not be contiguous
+        Extract the embedding with a hash id. the returned tensor may not be contiguous
         """
         raise NotImplementedError()
 
