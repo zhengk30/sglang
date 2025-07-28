@@ -10,6 +10,7 @@ class LBArgs:
     host: str = "0.0.0.0"
     port: int = 8000
     policy: str = "random"
+    encode_infos: list = dataclasses.field(default_factory=list)
     prefill_infos: list = dataclasses.field(default_factory=list)
     decode_infos: list = dataclasses.field(default_factory=list)
     log_interval: int = 5
@@ -40,6 +41,13 @@ class LBArgs:
             default=LBArgs.policy,
             choices=["random", "po2"],
             help=f"Policy to use for load balancing (default: {LBArgs.policy})",
+        )
+        parser.add_argument(
+            "--encode",
+            type=str,
+            default=[],
+            nargs="+",
+            help="URLs for encode servers",
         )
         parser.add_argument(
             "--prefill",
@@ -96,6 +104,7 @@ class LBArgs:
             host=args.host,
             port=args.port,
             policy=args.policy,
+            encode_infos=args.encode,
             prefill_infos=prefill_infos,
             decode_infos=args.decode,
             log_interval=args.log_interval,
@@ -118,7 +127,13 @@ def main():
     lb_args = LBArgs.from_cli_args(args)
 
     prefill_configs = [PrefillConfig(url, port) for url, port in lb_args.prefill_infos]
-    run(prefill_configs, lb_args.decode_infos, lb_args.host, lb_args.port)
+    run(
+            prefill_configs,
+            lb_args.decode_infos,
+            lb_args.encode_infos,
+            lb_args.host,
+            lb_args.port,
+        )
 
 
 if __name__ == "__main__":
