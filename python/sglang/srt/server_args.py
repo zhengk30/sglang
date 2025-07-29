@@ -665,9 +665,6 @@ class ServerArgs:
             self.disaggregation_prefill_pp = self.pp_size
             self.validate_disagg_tp_size(self.tp_size, self.disaggregation_decode_tp)
 
-            self.disable_cuda_graph = True
-            logger.warning("Cuda graph is disabled for prefill server")
-
         elif self.disaggregation_mode == "encode":
             if not self.disable_overlap_schedule:
                 self.disable_overlap_schedule = True
@@ -680,6 +677,9 @@ class ServerArgs:
                 self.disaggregation_decode_tp = self.tp_size
             if self.disaggregation_encode_dp is None:
                 self.disaggregation_encode_dp = self.dp_size
+
+            self.disable_cuda_graph = True
+            logger.warning("Cuda graph is disabled for encode server")
 
             # self.disaggregation_prefill_pp = self.pp_size
             self.validate_disagg_tp_size(self.tp_size, self.disaggregation_decode_tp)
