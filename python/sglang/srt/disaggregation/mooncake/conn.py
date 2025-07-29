@@ -568,6 +568,37 @@ class MooncakeKVManager(BaseKVManager):
 
         return self._transfer_data(mooncake_session_id, transfer_blocks)
 
+    def send_embedding(
+        self, session_id, embedding, dst_ptrs, embedding_start_indices=None
+    ):
+        """
+        Send the embedding tensor to the remote server using MooncakeTransferEngine.
+        """
+        # embedding: torch.Tensor, shape [N, D] or [D]
+        # dst_ptrs: list[int], 目标 buffer 地址（通常为 aux_data_ptrs）
+        import torch
+
+        if not torch.is_tensor(embedding):
+            raise ValueError("embedding must be a torch.Tensor")
+        # 假设 embedding 是 2D: [num_embeddings, dim]
+        embedding = embedding.contiguous()
+        embedding_data_ptr = embedding.data_ptr()
+        embedding_numel = embedding.numel() * embedding.element_size()
+        # 这里只做单 buffer 传输（可扩展为多 buffer）
+        if not isinstance(dst_ptrs, list):
+            dst_ptrs = [dst_ptrs]
+        # 只支持第一个 buffer
+        dst_ptr = dst_ptrs[0]
+        # 调用 transfer_sync 传输整个 embedding
+        status = self.engine.transfer_sync(
+            session_id, embedding_data_ptr, dst_ptr, embedding_numel
+        )
+        if status != 0:
+            logger.error(
+                f"Embedding transfer failed: session_id={session_id}, status={status}"
+            )
+        return status
+
     def sync_status_to_decode_endpoint(
         self, remote: str, dst_port: int, room: int, status: int, prefill_rank: int
     ):
@@ -1093,6 +1124,16 @@ class MooncakeKVSender(BaseKVSender):
         )
         # Explicitly set the status to failure since this request has been aborted
         self.conclude_state = KVPoll.Failed
+
+    def send_embedding(self, embedding, embedding_start_indices=None):
+        """
+        Send the embedding tensor to the remote server using MooncakeKVManager.
+        """
+        session_id = self.kv_mgr.get_session_id()
+        dst_ptrs = self.kv_mgr.kv_args.aux_data_ptrs
+        return self.kv_mgr.send_embedding(
+            session_id, embedding, dst_ptrs, embedding_start_indices
+        )
 
 
 class MooncakeKVReceiver(BaseKVReceiver):
