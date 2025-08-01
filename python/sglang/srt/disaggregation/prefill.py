@@ -271,7 +271,7 @@ class PrefillBootstrapQueue:
             return bootstrapped_reqs, failed_reqs
 
 
-class PrefillTransferQueue:
+class MMEmbeddingTransferQueue:
     """
     Store the requests that is polling mm embedding from encoders
     """
@@ -404,7 +404,7 @@ class PrefillPreallocQueue:
         req_to_metadata_buffer_idx_allocator: ReqToMetadataIdxAllocator,
         metadata_buffers: MetadataBuffers,
         scheduler: Scheduler,
-        transfer_queue: PrefillTransferQueue,
+        transfer_queue: MMEmbeddingTransferQueue,
         gloo_group: ProcessGroup,
         tp_rank: int,
         tp_size: int,
