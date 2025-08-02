@@ -50,8 +50,8 @@ from sglang.srt.disaggregation.encode import (
 )
 from sglang.srt.disaggregation.kv_events import EventPublisherFactory, KVEventBatch
 from sglang.srt.disaggregation.prefill import (
-    PrefillBootstrapQueue,
     MMEmbeddingTransferQueue,
+    PrefillBootstrapQueue,
     PrefillPreallocQueue,
     SchedulerDisaggregationPrefillMixin,
 )
@@ -1343,6 +1343,8 @@ class Scheduler(
             )
         elif self.disaggregation_mode == DisaggregationMode.DECODE:
             self.disagg_decode_prealloc_queue.add(req)
+        elif self.disaggregation_mode == DisaggregationMode.ENCODE:
+            self.disagg_encode_bootstrap_queue.add(req)
         else:
             self._prefetch_kvcache(req)
             self.waiting_queue.append(req)
