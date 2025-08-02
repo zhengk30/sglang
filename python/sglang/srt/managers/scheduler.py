@@ -546,6 +546,11 @@ class Scheduler(
         ):
             assert dp_balance_meta is not None
 
+        # vision disaggregation related
+        self.waiting_preallocate_queue: List[Req] = []
+        self.waiting_visual_queue: List[Req] = []
+        self.enable_disagg_vision = False
+
         self.recv_dp_balance_id_this_term = []
 
     def init_tokenizer(self):
