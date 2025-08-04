@@ -302,7 +302,8 @@ class MMEmbeddingTransferQueue:
         if not self.queue:
             return []
         polls = poll_and_all_reduce(
-            [embedding_req.embedding_receiver for embedding_req in self.queue], self.gloo_group
+            [embedding_req.embedding_receiver for embedding_req in self.queue],
+            self.gloo_group,
         )
 
         transferred_reqs = []
@@ -394,7 +395,7 @@ class MMEmbeddingTransferQueue:
         return transferred_reqs
 
 
-class LanguageModelPreallocQueue:
+class MMEmbeddingPreallocQueue:
     """
     Store the requests that are preallocating, to prealloc mm embeddings from encoder
     """
@@ -408,7 +409,6 @@ class LanguageModelPreallocQueue:
         scheduler: Scheduler,
         transfer_queue: MMEmbeddingTransferQueue,
         gloo_group: ProcessGroup,
-        # tp_rank: int,
         # tp_size: int,
         # dp_size: int,
         gpu_id: int,
@@ -417,6 +417,7 @@ class LanguageModelPreallocQueue:
         # prefill_pp_size: int,
         # num_reserved_decode_tokens: int,
         transfer_backend: TransferBackend,
+        tp_rank: Optional[int] = -1,
     ):
         self.mm_embedding_pool = mm_embedding_pool
         self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
@@ -439,6 +440,7 @@ class LanguageModelPreallocQueue:
         self.queue: List[EmbeddingRequest] = []
         self.retracted_queue: List[Req] = []
         self.kv_manager = self._init_kv_manager()
+        self.tp_rank = tp_rank
 
     def _init_kv_manager(self) -> BaseKVManager:
         # TODO
@@ -477,9 +479,12 @@ class LanguageModelPreallocQueue:
 
     def add(self, req: Req, is_retracted: bool = False) -> None:
         """Add a request to the pending queue."""
+        print(
+            f"adding request to MMEmbeddingPreallocQueue, waiting to be bootstrapped..."
+        )
         if self._check_if_req_exceed_mm_pool_capacity(req):
             return
-
+        print(f"{req=}")
         if is_retracted:
             self.retracted_queue.append(req)
         else:
@@ -491,17 +496,18 @@ class LanguageModelPreallocQueue:
                 kv_receiver_class = get_kv_class(
                     self.transfer_backend, KVClassType.RECEIVER
                 )
-
+            print(f"{req.bootstrap_host_encode=}")
+            print(f"{req.bootstrap_port_encode=}")
             kv_receiver = kv_receiver_class(
                 mgr=self.kv_manager,
-                bootstrap_addr=f"{req.bootstrap_host}:{req.bootstrap_port}",
+                bootstrap_addr=f"{req.bootstrap_host_encode}:{req.bootstrap_port_encode}",
                 bootstrap_room=req.bootstrap_room,
                 data_parallel_rank=req.data_parallel_rank,
             )
-
+            print(f"EmbeddingRequest added")
             self.queue.append(
                 EmbeddingRequest(
-                    req=req, kv_receiver=kv_receiver, waiting_for_input=False
+                    req=req, embedding_receiver=kv_receiver, waiting_for_input=False
                 )
             )
 
@@ -515,22 +521,24 @@ class LanguageModelPreallocQueue:
         #     return True
         return False
 
-    def extend(self, reqs: List[Req], is_retracted: bool = False) -> None:
+    def extend(self, reqs: List[Req]) -> None:
         """Add a request to the pending queue."""
         for req in reqs:
-            self.add(req, is_retracted=is_retracted)
+            self.add(req)
 
     def resume_retracted_reqs(self) -> List[Req]:
         # TODO refactor the scheduling part, reuse with the unified engine logic as much as possible
-
+        # print(f"resume_retracted_reqs...")
         # allocate memory
         resumed_reqs = []
         indices_to_remove = set()
-        allocatable_tokens = self._allocatable_tokens(count_retracted=False)
+        allocatable_tokens = self._allocatable_tokens()
 
         for i, req in enumerate(self.retracted_queue):
             if self.mm_embedding_pool.available_size() <= 0:
                 break
+
+            print(f"{req=}")
 
             required_tokens_for_request = sum(req.mm_embedding_lens)
             if required_tokens_for_request > allocatable_tokens:
@@ -561,7 +569,8 @@ class LanguageModelPreallocQueue:
             return
 
         polls = poll_and_all_reduce(
-            [embedding_req.embedding_receiver for embedding_req in self.queue], self.gloo_group
+            [embedding_req.embedding_receiver for embedding_req in self.queue],
+            self.gloo_group,
         )
 
         for i, (decode_req, poll) in enumerate(zip(self.queue, polls)):
@@ -591,7 +600,7 @@ class LanguageModelPreallocQueue:
         preallocated_reqs = []
         indices_to_remove = set()
 
-        allocatable_tokens = self._allocatable_tokens(count_retracted=True)
+        allocatable_tokens = self._allocatable_tokens()
         # First, remove all failed requests from the queue
         for i, prefill_req in enumerate(self.queue):
             if isinstance(prefill_req.req.finished_reason, FINISH_ABORT):
@@ -649,11 +658,12 @@ class LanguageModelPreallocQueue:
             len(decode_req.req.fill_ids) for decode_req in self.transfer_queue.queue
         )
 
-    def _allocatable_tokens(self, count_retracted: bool = True) -> int:
-        return self.mm_embedding_pool.allocated()
+    def _allocatable_tokens(self) -> int:
+        return self.mm_embedding_pool.available_size()
 
     def _pre_alloc(self, req: Req) -> torch.Tensor:
         """Pre-allocate the memory for req_to_token and token_kv_pool"""
+        print(f"pre_allocating...")
         # req_pool_indices = self.mm_embedding_pool.alloc(1)
 
         # assert (
@@ -671,7 +681,9 @@ class LanguageModelPreallocQueue:
         embedding_locs = []
         for mm_hash, num_token in zip(req.mm_hashes, req.mm_embedding_lens):
             embedding_loc = self.token_to_kv_pool_allocator.alloc(num_token)
-            self.mm_embedding_pool.reserve_mm_embedding(mm_hash, num_token, embedding_loc)
+            self.mm_embedding_pool.reserve_mm_embedding(
+                mm_hash, num_token, embedding_loc
+            )
             embedding_locs += [embedding_loc]
 
         # assert (
@@ -685,6 +697,7 @@ class LanguageModelPreallocQueue:
         # req.extend_input_len = len(req.origin_input_ids)
 
         return embedding_locs
+
 
 class SchedulerDisaggregationPrefillMixin:
     """
@@ -700,28 +713,32 @@ class SchedulerDisaggregationPrefillMixin:
             self.disagg_prefill_bootstrap_queue.pop_bootstrapped()
         )
         # TODO:
-        self.waiting_visual_queue.extend(
-            []
-        )
+        self.waiting_visual_queue.extend([])
         bootstrapped_room_ids = [
-            req.bootstrap_room for req in self.waiting_visual_queue
-            if req.bootstrap_room in [
-                req.bootstrap_room for req in self.waiting_preallocate_queue
-            ]
+            req.bootstrap_room
+            for req in self.waiting_visual_queue
+            if req.bootstrap_room
+            in [req.bootstrap_room for req in self.waiting_preallocate_queue]
         ]
 
         self.waiting_visual_queue = [
-            req for req in self.waiting_visual_queue
+            req
+            for req in self.waiting_visual_queue
             if req.bootstrap_room not in bootstrapped_room_ids
         ]
 
         self.waiting_preallocate_queue = [
-            req for req in self.waiting_preallocate_queue
+            req
+            for req in self.waiting_preallocate_queue
             if req.bootstrap_room not in bootstrapped_room_ids
         ]
         self.waiting_queue.extend(
-            [req for req in self.waiting_visual_queue
-                if req.bootstrap_room in bootstrapped_room_ids])
+            [
+                req
+                for req in self.waiting_visual_queue
+                if req.bootstrap_room in bootstrapped_room_ids
+            ]
+        )
 
     @torch.no_grad()
     def event_loop_normal_disagg_prefill(self: Scheduler) -> None:
@@ -730,7 +747,8 @@ class SchedulerDisaggregationPrefillMixin:
         while True:
             recv_reqs = self.recv_requests()
             self.process_input_requests(recv_reqs)
-            if self.enable_disagg_vision:
+            if self.server_args.encoder_disaggregated:
+                # self.process_prefill_queue_with_encoder_disaggregated()
                 self.poll_req_to_waiting_queue()
             else:
                 self.waiting_queue.extend(
