@@ -290,16 +290,16 @@ class MooncakeKVManager(BaseKVManager):
         )
 
     def register_buffer_to_engine(self):
-        for kv_data_ptr, kv_data_len in zip(
-            self.kv_args.kv_data_ptrs, self.kv_args.kv_data_lens
-        ):
-            self.engine.register(kv_data_ptr, kv_data_len)
-
         if self.disaggregation_mode == "prefill":
-            for aux_data_ptr, aux_data_len in zip(
-                self.kv_args.aux_data_ptrs, self.kv_args.aux_data_lens
+            for kv_data_ptr, kv_data_len in zip(
+                self.kv_args.kv_data_ptrs, self.kv_args.kv_data_lens
             ):
-                self.engine.register(aux_data_ptr, aux_data_len)
+                self.engine.register(kv_data_ptr, kv_data_len)
+
+                for aux_data_ptr, aux_data_len in zip(
+                    self.kv_args.aux_data_ptrs, self.kv_args.aux_data_lens
+                ):
+                    self.engine.register(aux_data_ptr, aux_data_len)
 
     @cache
     def _connect(self, endpoint: str, is_ipv6: bool = False):
@@ -1179,7 +1179,9 @@ class MooncakeKVManager(BaseKVManager):
                     f"{role_str} instance failed to connect to bootstrap server: {response.status_code}, {response.text}"
                 )
         except Exception as e:
-            logger.error(f"{role_str} instance failed to register to bootstrap server: {e}")
+            logger.error(
+                f"{role_str} instance failed to register to bootstrap server: {e}"
+            )
 
     def _handle_node_failure(self, failed_bootstrap_addr):
         with self.connection_lock:
@@ -1342,7 +1344,9 @@ class MooncakeKVReceiver(BaseKVReceiver):
         data_parallel_rank: Optional[int] = None,
     ):
         self.bootstrap_room = bootstrap_room
+        # bootstrap_addr = '127.0.0.1:8998'
         self.bootstrap_addr = bootstrap_addr
+        print(f"MooncakeKVReceiver {bootstrap_addr=}")
         self.kv_mgr = mgr
         self.session_id = self.kv_mgr.get_session_id()
         self.kv_mgr.update_status(self.bootstrap_room, KVPoll.Bootstrapping)
@@ -1351,7 +1355,8 @@ class MooncakeKVReceiver(BaseKVReceiver):
         self.data_parallel_rank = data_parallel_rank
 
         if self.bootstrap_addr not in self.kv_mgr.prefill_dp_size_table:
-            (
+
+(
                 self.prefill_attn_tp_size,
                 self.prefill_dp_size,
                 self.prefill_pp_size,
@@ -1519,6 +1524,7 @@ class MooncakeKVReceiver(BaseKVReceiver):
         try:
             url = f"http://{self.bootstrap_addr}/route?engine_rank={-1}&target_dp_group={-1}&target_pp_rank={-1}"
             response = requests.get(url)
+            print(f"{response=}")
             if response.status_code == 200:
                 prefill_parallel_info = response.json()
                 return (
@@ -1683,6 +1689,7 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
         # Start bootstrap server
         self.thread = threading.Thread(target=self._run_server, daemon=True)
         self.run()
+        print(f"bootstrap server started at: {port}")
 
     def run(self):
         self.thread.start()
@@ -1696,6 +1703,7 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
 
     async def _handle_route(self, request: web.Request):
         method = request.method
+        print(f"handle route: {request=}")
         if method == "PUT":
             return await self._handle_route_put(request)
         elif method == "GET":
@@ -1719,7 +1727,7 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
         rank_ip = data["rank_ip"]
         rank_port = int(data["rank_port"])
 
-        if role == "Prefill":
+        if role == DisaggregationMode.PREFILL.role_str:
             tp_size = data["tp_size"]
             dp_size = data["dp_size"]
             rank_ip = data["rank_ip"]
@@ -1755,7 +1763,7 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
             logger.debug(
                 f"Register prefill bootstrap: DP {dp_group} TP{attn_tp_rank} PP{pp_rank} with rank_ip: {rank_ip} and rank_port: {rank_port}"
             )
-        elif role == "Encode":
+        elif role == DisaggregationMode.ENCODE.role_str:
             pass
             # self.encode_port_table[dp_group][tp_rank_in_dp_group] = {
             #     "rank_ip": rank_ip,
@@ -1765,6 +1773,7 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
         return web.Response(text="OK", status=200)
 
     async def _handle_route_get(self, request: web.Request):
+        print("_handle_route_get")
         engine_rank = request.query.get("engine_rank")
         target_dp_group = request.query.get("target_dp_group")
         target_pp_rank = request.query.get("target_pp_rank")
