@@ -23,7 +23,6 @@ import sys
 import tempfile
 from typing import List, Literal, Optional, Union
 
-from sglang.srt.disaggregation.utils import DisaggregationMode
 from sglang.srt.hf_transformers_utils import check_gguf_file, get_config
 from sglang.srt.layers.utils import is_sm100_supported
 from sglang.srt.lora.lora_registry import LoRARef
@@ -1911,7 +1910,7 @@ class ServerArgs:
             "--disaggregation-bootstrap-port-encode",
             type=int,
             default=ServerArgs.disaggregation_bootstrap_port_encode,
-            help="Bootstrap server port on the prefill server. Default is 8998.",
+            help="Bootstrap server port on the prefill server. Default is 8999.",
         )
         parser.add_argument(
             "--disaggregation-decode-tp",
@@ -2232,6 +2231,24 @@ class ServerArgs:
         self.mem_fraction_static = (
             original_server_arg_mem_fraction * final_overall_factor
         )
+
+    def get_bootstrap_sending_port(self) -> int:
+        """
+        bootstrap port varies in encode and prefill servers
+        """
+        return (
+            self.disaggregation_bootstrap_port_encode
+            if self.disaggregation_mode == "encode"
+            else self.disaggregation_bootstrap_port
+        )
+
+    # def get_bootstrap_sending_port(self) -> int:
+    #     """
+    #         bootstrap port varies in encode and prefill servers
+    #     """
+    #     return self.disaggregation_bootstrap_port_encode if (
+    #             self.disaggregation_mode == "prefill" or self.disaggregation_mode == "text") \
+    #         else self.disaggregation_bootstrap_port
 
 
 def prepare_server_args(argv: List[str]) -> ServerArgs:

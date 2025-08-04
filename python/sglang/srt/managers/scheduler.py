@@ -739,7 +739,7 @@ class Scheduler(
                 tp_size=self.tp_size,
                 dp_size=self.server_args.dp_size,
                 gpu_id=self.gpu_id,
-                bootstrap_port=self.server_args.disaggregation_bootstrap_port,
+                bootstrap_port=self.server_args.get_bootstrap_sending_port(),
                 max_total_num_tokens=self.max_total_num_tokens,
                 prefill_pp_size=self.server_args.disaggregation_prefill_pp,
                 num_reserved_decode_tokens=self.server_args.num_reserved_decode_tokens,
@@ -813,7 +813,7 @@ class Scheduler(
                     # tp_size=self.tp_size,
                     # dp_size=1,
                     gpu_id=self.gpu_id,
-                    bootstrap_port=self.server_args.disaggregation_bootstrap_port,
+                    bootstrap_port=self.server_args.disaggregation_bootstrap_port_encode,
                     max_total_num_tokens=self.max_total_num_tokens,
                     # prefill_pp_size=self.server_args.disaggregation_prefill_pp,
                     # num_reserved_decode_tokens=self.server_args.num_reserved_decode_tokens,
@@ -846,7 +846,7 @@ class Scheduler(
                 # tp_rank=self.tp_rank,
                 # tp_size=self.tp_size,
                 gpu_id=self.gpu_id,
-                bootstrap_port=self.server_args.disaggregation_bootstrap_port,
+                bootstrap_port=self.server_args.disaggregation_bootstrap_port_encode,
                 gloo_group=self.attn_tp_cpu_group,
                 max_total_num_tokens=self.max_total_num_tokens,
                 # decode_tp_size=self.server_args.disaggregation_decode_tp,
@@ -1206,7 +1206,15 @@ class Scheduler(
 
             if recv_req.bootstrap_port is None:
                 # Use default bootstrap port
-                recv_req.bootstrap_port = self.server_args.disaggregation_bootstrap_port
+                recv_req.bootstrap_port = (
+                    self.server_args.disaggregation_bootstrap_port_encode
+                    if (
+                        self.disaggregation_mode == DisaggregationMode.PREFILL
+                        or self.disaggregation_mode == DisaggregationMode.TEXT
+                    )
+                    else self.server_args.disaggregation_bootstrap_port
+                )
+                print(f"{recv_req.bootstrap_port=}")
 
             req = Req(
                 recv_req.rid,
