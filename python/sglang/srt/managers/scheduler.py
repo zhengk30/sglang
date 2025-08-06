@@ -1386,6 +1386,8 @@ class Scheduler(
             # TODO: should we skip this req at lb-side?
             if req.contains_mm_input():
                 self.disagg_encode_bootstrap_queue.add(req)
+            else:
+                logger.warning("Skipping pure text request")
         else:
             self._prefetch_kvcache(req)
             self.waiting_queue.append(req)
