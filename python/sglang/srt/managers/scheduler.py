@@ -49,6 +49,7 @@ from sglang.srt.disaggregation.encode import (
     SchedulerDisaggregationEncodeMixin,
 )
 from sglang.srt.disaggregation.kv_events import EventPublisherFactory, KVEventBatch
+from sglang.srt.disaggregation.mooncake import MooncakeKVSender
 from sglang.srt.disaggregation.prefill import (
     MMEmbeddingPreallocQueue,
     MMEmbeddingTransferQueue,
@@ -547,8 +548,9 @@ class Scheduler(
             assert dp_balance_meta is not None
 
         # vision disaggregation related
-        self.waiting_preallocate_queue: List[Req] = []
-        self.waiting_encode_queue: List[Req] = []
+        self.bootstrapped_queue: List[Req] = []
+        # reqs waiting for associated mm embeddings to be transferred
+        self.embedding_received_bootstrapped_queue: List[Req] = []
 
         self.recv_dp_balance_id_this_term = []
 
@@ -788,13 +790,12 @@ class Scheduler(
                 # The prefill requests that are in the middle of kv sending
                 self.disagg_prefill_inflight_queue: List[Req] = []
 
-            # TODO: only if encode is disaggregated
             if (
                 self.server_args.encoder_disaggregated
                 or self.server_args.disaggregation_mode == "text"
             ):
                 # The prefill requests polling mm embedding cache
-                self.disagg_prefill_transfer_queue = MMEmbeddingTransferQueue(
+                self.disagg_prefill_receiving_queue = MMEmbeddingTransferQueue(
                     gloo_group=self.attn_tp_cpu_group,
                     # req_to_metadata_buffer_idx_allocator=self.req_to_metadata_buffer_idx_allocator,
                     tp_rank=self.tp_rank,
@@ -809,7 +810,7 @@ class Scheduler(
                     # req_to_metadata_buffer_idx_allocator=self.req_to_metadata_buffer_idx_allocator,
                     # metadata_buffers=self.disagg_metadata_buffers,
                     scheduler=self,
-                    transfer_queue=self.disagg_prefill_transfer_queue,
+                    transfer_queue=self.disagg_prefill_receiving_queue,
                     gloo_group=self.attn_tp_cpu_group,
                     # tp_rank=self.tp_rank,
                     # scheduler=self
@@ -1178,12 +1179,12 @@ class Scheduler(
                 else:
                     self.send_to_tokenizer.send_pyobj(output)
 
-        if (
-            self.server_args.encoder_disaggregated
-            or self.server_args.disaggregation_mode == "text"
-        ):
-            # TEXT mode
-            self.process_prefill_queue_with_encoder_disaggregated()
+        # if (
+        #     self.server_args.encoder_disaggregated
+        #     or self.server_args.disaggregation_mode == "text"
+        # ):
+        #     # TEXT mode
+        #     self.process_prefill_queue_with_encoder_disaggregated()
 
     def handle_generate_request(
         self,
@@ -1373,10 +1374,16 @@ class Scheduler(
                 or self.disaggregation_mode == DisaggregationMode.TEXT
             ):
                 if req.contains_mm_input():
+                    # pre-allocate first
                     self.disagg_prefill_prealloc_queue.add(req)
                 else:
-                    self.waiting_queue.append(req)
-            if self.disaggregation_mode == DisaggregationMode.PREFILL:
+                    self.disagg_prefill_bootstrap_queue.add(
+                        req, self.model_config.num_key_value_heads
+                    )
+            elif (
+                self.disaggregation_mode == DisaggregationMode.PREFILL
+                and not self.server_args.encoder_disaggregated
+            ):
                 self.disagg_prefill_bootstrap_queue.add(
                     req, self.model_config.num_key_value_heads
                 )

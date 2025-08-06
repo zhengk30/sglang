@@ -100,8 +100,7 @@ async def process_sample(
         max_tokens=sampling_params["max_new_tokens"],
         extra_body=extra_body,
     )
-    return sample, None
-    # return sample, response.choices[0].message.content
+    return sample, response.choices[0].message.content
 
 
 async def process_sample_with_semaphore(
