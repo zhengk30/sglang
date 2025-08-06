@@ -372,7 +372,7 @@ class MMEmbeddingTransferQueue:
                 #     )
                 # else:
                 #     transferred_reqs.append(embedding_req)
-                transferred_reqs.append(embedding_req)
+                transferred_reqs.append(embedding_req.req)
 
                 indices_to_remove.add(i)
             elif poll in [
