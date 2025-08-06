@@ -548,7 +548,7 @@ class Scheduler(
 
         # vision disaggregation related
         self.waiting_preallocate_queue: List[Req] = []
-        self.waiting_visual_queue: List[Req] = []
+        self.waiting_encode_queue: List[Req] = []
 
         self.recv_dp_balance_id_this_term = []
 
