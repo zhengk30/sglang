@@ -1410,7 +1410,7 @@ class MooncakeKVReceiver(BaseKVReceiver):
             self.prefill_attn_tp_size = self.kv_mgr.prefill_attn_tp_size_table[
                 self.bootstrap_addr
             ]
-            self.prefill_dp_size = self.kv_mgr.prefillprefill_dp_size = _dp_size_table[
+            self.prefill_dp_size = self.kv_mgr.prefill_dp_size_table[
                 self.bootstrap_addr
             ]
             self.prefill_pp_size = self.kv_mgr.prefill_pp_size_table[
