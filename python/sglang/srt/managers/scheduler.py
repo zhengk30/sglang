@@ -1369,7 +1369,8 @@ class Scheduler(
         ):
             self._prefetch_kvcache(req)
             if self.server_args.encoder_disaggregated:
-                self.disagg_prefill_bootstrap_queue.add(req)
+                if self.disaggregation_mode == DisaggregationMode.PREFILL:
+                    self.disagg_prefill_bootstrap_queue.add(req)
                 if req.contains_mm_input():
                     # requires receiving mm embedding
                     self.disagg_prefill_prealloc_queue.add(req)
