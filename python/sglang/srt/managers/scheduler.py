@@ -556,8 +556,8 @@ class Scheduler(
         self.bootstrapped_queue: List[Req] = []
         # reqs whose required mm embedding has already been received
         self.embedding_received_queue: List[Req] = []
-
         self.recv_dp_balance_id_this_term = []
+
 
     def init_tokenizer(self):
         server_args = self.server_args
@@ -825,6 +825,18 @@ class Scheduler(
                     # num_reserved_decode_tokens=self.server_args.num_reserved_decode_tokens,
                     transfer_backend=self.transfer_backend,
                 )
+
+                # epd related
+                # reqs which have already been bootstrapped
+
+                # a image-containing req should go to:
+                # 1. disagg_prefill_prealloc_queue -> disagg_prefill_receiving_queue -> mm_received_reqs
+                # 2. disagg_prefill_bootstrap_queue
+                # before going into waiting_queue
+                self.bootstrapped_queue: List[Req] = []
+                # reqs whose required mm embedding has already been received
+                self.embedding_received_queue: List[Req] = []
+
         elif self.disaggregation_mode == DisaggregationMode.ENCODE:
             assert self.model_config.vision_config is not None
             buffer_size = self.max_running_requests * 2
