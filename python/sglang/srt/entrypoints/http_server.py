@@ -348,7 +348,7 @@ async def get_model_info():
 
 @app.get("/get_server_info")
 async def get_server_info():
-    # Returns interna states per DP.
+    # Returns internal states per DP.
     internal_states: List[Dict[Any, Any]] = (
         await _global_state.tokenizer_manager.get_internal_state()
     )
