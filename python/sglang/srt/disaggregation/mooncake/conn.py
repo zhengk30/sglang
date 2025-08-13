@@ -16,7 +16,6 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 import requests
-import torch
 import zmq
 from aiohttp import web
 
@@ -1771,14 +1770,22 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
         system_dp_size = data["system_dp_size"]
         system_dp_rank = data["system_dp_rank"]
         rank_ip = data["rank_ip"]
-        rank_port = int(data["rank_port"])
+
+        if self.attn_tp_size is None:
+            self.attn_tp_size = attn_tp_size
+
+        if self.dp_size is None:
+            self.dp_size = attn_dp_size if system_dp_size == 1 else system_dp_size
+
+        if self.pp_size is None:
+            self.pp_size = pp_size
 
         if role == DisaggregationMode.PREFILL.role_str:
-            tp_size = data["tp_size"]
-            dp_size = data["dp_size"]
+            # tp_size = data["tp_size"]
+            # dp_size = data["dp_size"]
             rank_ip = data["rank_ip"]
             rank_port = int(data["rank_port"])
-            engine_rank = int(data["engine_rank"])
+            # engine_rank = int(data["engine_rank"])
 
             if self.attn_tp_size is None:
                 self.attn_tp_size = attn_tp_size
@@ -1789,7 +1796,6 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
             if self.pp_size is None:
                 self.pp_size = pp_size
 
-        if role == "Prefill":
             if system_dp_size == 1:
                 dp_group = attn_dp_rank
             else:
@@ -1806,40 +1812,45 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
                 "rank_ip": rank_ip,
                 "rank_port": rank_port,
             }
+
             logger.debug(
                 f"Register prefill bootstrap: DP {dp_group} TP{attn_tp_rank} PP{pp_rank} with rank_ip: {rank_ip} and rank_port: {rank_port}"
             )
         elif role == DisaggregationMode.ENCODE.role_str:
-            tp_size = data["tp_size"]
-            dp_size = data["dp_size"]
-            rank_ip = data["rank_ip"]
+            # tp_size = data["tp_size"]
+            # dp_size = data["dp_size"]
+            # rank_ip = data["rank_ip"]
             rank_port = int(data["rank_port"])
-            engine_rank = int(data["engine_rank"])
+            # engine_rank = int(data["engine_rank"])
 
             # if self.tp_size is None:
             #     self.tp_size = tp_size
 
-            if self.dp_size is None:
-                self.dp_size = dp_size
+            if system_dp_size == 1:
+                dp_group = attn_dp_rank
+            else:
+                dp_group = system_dp_rank
 
-            tp_size_per_dp_rank = tp_size // dp_size
-            if self.tp_size_per_dp_rank is None:
-                self.tp_size_per_dp_rank = tp_size_per_dp_rank
+            # tp_size_per_dp_rank = tp_size // dp_size
+            # if self.tp_size_per_dp_rank is None:
+            #     self.tp_size_per_dp_rank = tp_size_per_dp_rank
 
-            dp_group = engine_rank // tp_size_per_dp_rank
-            tp_rank_in_dp_group = engine_rank % tp_size_per_dp_rank
+            # dp_group = engine_rank // tp_size_per_dp_rank
+            # tp_rank_in_dp_group = engine_rank % tp_size_per_dp_rank
 
             # Add lock to make sure thread-safe
             async with self.lock:
                 if dp_group not in self.port_table:
                     self.port_table[dp_group] = {}
+                if attn_tp_rank not in self.port_table[dp_group]:
+                    self.port_table[dp_group][attn_tp_rank] = {}
 
-            self.port_table[dp_group][tp_rank_in_dp_group] = {
+            self.port_table[dp_group][attn_tp_rank][pp_rank] = {
                 "rank_ip": rank_ip,
                 "rank_port": rank_port,
             }
             logger.debug(
-                f"Register prefill bootstrap: {engine_rank} with rank_ip: {rank_ip} and rank_port: {rank_port}"
+                f"Register encode bootstrap: DP {dp_group} TP{attn_tp_rank} PP{pp_rank} with rank_ip: {rank_ip} and rank_port: {rank_port}"
             )
 
         return web.Response(text="OK", status=200)
@@ -1848,8 +1859,8 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
         engine_rank = request.query.get("engine_rank")
         target_dp_group = request.query.get("target_dp_group")
         target_pp_rank = request.query.get("target_pp_rank")
-        print(f"{engine_rank=}")
-        print(f"{target_dp_group=}")
+        # print(f"{engine_rank=}")
+        # print(f"{target_dp_group=}")
 
         if not engine_rank or not target_dp_group:
             return web.Response(text="Missing inputs for bootstrap server.", status=400)

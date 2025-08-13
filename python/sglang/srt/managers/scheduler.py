@@ -48,7 +48,6 @@ from sglang.srt.disaggregation.encode import (
     EncodeBootstrapQueue,
     SchedulerDisaggregationEncodeMixin,
 )
-from sglang.srt.disaggregation.kv_events import EventPublisherFactory, KVEventBatch
 from sglang.srt.disaggregation.prefill import (
     MMEmbeddingPreallocQueue,
     MMEmbeddingTransferQueue,
@@ -119,7 +118,6 @@ from sglang.srt.managers.schedule_policy import (
     PrefillAdder,
     SchedulePolicy,
 )
-from sglang.srt.managers.schedule_policy_encode_adder import EncodeAdder
 from sglang.srt.managers.scheduler_input_blocker import SchedulerInputBlocker
 from sglang.srt.managers.scheduler_metrics_mixin import (
     RECORD_STEP_TIME,
@@ -376,7 +374,7 @@ class Scheduler(
         self.world_group = get_world_group()
 
         self.pad_input_ids_func = self.tp_worker.get_pad_input_ids_func()
-        global_server_args_dict.update(worker_global_server_args_dict)
+        global_server_args_dict.update(worker_global_server_args_dict or {})
         set_random_seed(self.random_seed)
 
         # Hybrid memory pool
@@ -823,6 +821,8 @@ class Scheduler(
                     # prefill_pp_size=self.server_args.disaggregation_prefill_pp,
                     # num_reserved_decode_tokens=self.server_args.num_reserved_decode_tokens,
                     transfer_backend=self.transfer_backend,
+                    pp_rank=self.pp_rank,
+                    pp_size=self.pp_size,
                 )
 
                 # epd related
@@ -1200,8 +1200,8 @@ class Scheduler(
         self,
         recv_req: TokenizedGenerateReqInput,
     ):
-        print(f"scheduler handle_generate_request")
-        print(f"{recv_req=}")
+        logger.debug(f"scheduler handle_generate_request")
+        logger.debug(f"{recv_req=}")
 
         if (
             self.server_args.enable_dp_attention

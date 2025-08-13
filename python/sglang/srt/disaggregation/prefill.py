@@ -418,6 +418,8 @@ class MMEmbeddingPreallocQueue:
         gpu_id: int,
         bootstrap_port: int,
         max_total_num_tokens: int,
+        pp_rank: int,
+        pp_size: int,
         # prefill_pp_size: int,
         # num_reserved_decode_tokens: int,
         transfer_backend: TransferBackend,
@@ -435,6 +437,8 @@ class MMEmbeddingPreallocQueue:
         self.tp_rank = tp_rank
         self.tp_size = tp_size
         self.dp_size = dp_size
+        self.pp_rank = pp_rank
+        self.pp_size = pp_size
         self.gpu_id = gpu_id
         self.bootstrap_port = bootstrap_port
         self.max_total_num_tokens = max_total_num_tokens
@@ -469,7 +473,13 @@ class MMEmbeddingPreallocQueue:
         kv_args.aux_data_ptrs = []
         kv_args.aux_data_lens = []
         kv_args.aux_item_lens = None
-
+        kv_args.pp_rank = self.scheduler.dp_rank
+        kv_args.system_dp_rank = self.pp_rank
+        kv_args.system_dp_size = (
+            1
+            if self.scheduler.server_args.enable_dp_attention
+            else self.scheduler.server_args.dp_size
+        )
         #
         # kv_args.aux_data_ptrs, kv_args.aux_data_lens, kv_args.aux_item_lens = (
         #     self.metadata_buffers.get_buf_infos()

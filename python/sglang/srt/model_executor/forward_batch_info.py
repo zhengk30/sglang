@@ -47,7 +47,12 @@ from sglang.srt.layers.dp_attention import (
 from sglang.srt.layers.rotary_embedding import MRotaryEmbedding
 from sglang.srt.mem_cache.allocator import TokenToKVPoolAllocator
 from sglang.srt.mem_cache.multimodal_cache import PagedMultiModalEmbeddingPool
-from sglang.srt.utils import get_compiler_backend, is_npu, support_triton
+from sglang.srt.utils import (
+    flatten_nested_list,
+    get_compiler_backend,
+    is_npu,
+    support_triton,
+)
 
 if TYPE_CHECKING:
     from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
@@ -518,9 +523,9 @@ class ForwardBatch:
             # print(f"{self.forward_mode=}")
             if self.forward_mode.is_decode():
                 mrope_position_deltas = (
-                    torch.zeros((1,), device=model_runner.device)
+                    [0]
                     if mm_input is None
-                    else mm_input.mrope_position_delta
+                    else flatten_nested_list(mm_input.mrope_position_delta.tolist())
                 )
                 next_input_positions = []
                 for mrope_position_delta in mrope_position_deltas:
@@ -535,9 +540,7 @@ class ForwardBatch:
                     ]
 
                 # 3 * N
-                mrope_positions_list[batch_idx] = torch.cat(
-                    next_input_positions, dim=1, device=model_runner.device
-                )
+                mrope_positions_list[batch_idx] = torch.cat(next_input_positions, dim=1)
             elif self.forward_mode.is_extend():
                 extend_seq_len, extend_prefix_len = (
                     batch.extend_seq_lens[batch_idx],
@@ -555,8 +558,7 @@ class ForwardBatch:
                                 )
                             ]
                         ]
-                        * 3,
-                        device=model_runner.device,
+                        * 3
                     )
                 else:
                     mrope_positions = mm_input.mrope_positions[
@@ -568,9 +570,7 @@ class ForwardBatch:
         self.mrope_positions = torch.cat(
             [pos.to(device=model_runner.device) for pos in mrope_positions_list],
             dim=1,
-            dtype=torch.int64,
-            device=model_runner.device,
-        )
+        ).to(dtype=torch.int64, device=model_runner.device)
 
     def get_max_chunk_capacity(self):
         # Maximum number of tokens in each chunk

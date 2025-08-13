@@ -462,7 +462,7 @@ def _get_chunked_prefill_embedding(
                 embedding_per_req
             )  # FIXME(encode's model should early exit)
             continue
-        embedding_per_req_chunk, _, _ = get_embedding_chunk(
+        embedding_per_req_chunk, _, end_index = get_embedding_chunk(
             embedding=embedding_per_req,
             extend_prefix_len=prefix_length[i],
             extend_seq_len=extend_length[i] if i < len(extend_length) else 0,
@@ -476,9 +476,7 @@ def _get_chunked_prefill_embedding(
             else embedding_per_req.shape[0] * embedding_per_req.shape[1]
         )
         if end_index == embedding_per_req_length:
-            embedding_cache.free(
-                combined_hash, mm_embedding_allocator=mm_embedding_allocator
-            )
+            embedding_cache.free(combined_hash, None)
         embedding_list.append(embedding_per_req_chunk)
     if len(embedding_list) == 0:
         return None

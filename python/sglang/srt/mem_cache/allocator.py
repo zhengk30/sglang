@@ -20,7 +20,7 @@ Page-aligned memory pool.
 """
 
 import abc
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import torch
 import triton
@@ -127,7 +127,7 @@ class TokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
         dtype: torch.dtype,
         device: str,
         kvcache: KVCache,
-        need_sort: bool,
+        need_sort: Optional[bool] = False,
     ):
         super().__init__(size, 1, dtype, device, kvcache, need_sort)
         self.clear()

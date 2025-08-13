@@ -24,7 +24,7 @@ import threading
 import time
 from collections import deque
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import torch
 
@@ -112,6 +112,10 @@ class EncodeBootstrapQueue:
         kv_args.page_size = 1
         # placeholder
         kv_args.engine_rank = 0
+        kv_args.system_dp_rank = self.scheduler.dp_rank
+        kv_args.system_dp_size = self.scheduler.dp_size
+        kv_args.pp_rank = self.scheduler.pp_rank
+        kv_args.pp_size = self.scheduler.pp_size
 
         # kv_args.page_size = self.mm_embedding_pool.page_size
         #
@@ -405,6 +409,10 @@ class SchedulerDisaggregationEncodeMixin:
                 self.disagg_encode_bootstrap_queue.pop_bootstrapped()
             )
             self.waiting_queue.extend(bootstrapped)
+            if self.waiting_queue:
+                logger.debug(
+                    f"waiting queue not empty, forwarding... {len(self.waiting_queue)=}"
+                )
 
             batch = self.get_new_batch_encode()
 

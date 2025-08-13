@@ -133,7 +133,7 @@ class TpModelWorker:
             # TODO: requires
             self.max_total_num_tokens = sys.maxsize
             self.max_prefill_tokens = server_args.max_prefill_tokens
-            self.max_running_requests = 3
+            self.max_running_requests = 1000
             self.max_req_len = sys.maxsize
             self.max_req_input_len = sys.maxsize
         else:
@@ -149,7 +149,7 @@ class TpModelWorker:
                 self.model_runner.req_to_token_pool.size,
             )
             assert self.max_running_requests > 0, "max_running_request is zero"
-            self.max_queued_requests = server_args.max_queued_requests
+        self.max_queued_requests = server_args.max_queued_requests
         assert (
             self.max_running_requests > 0
         ), "max_queued_requests is zero. We need to be at least 1 to schedule a request."
@@ -191,14 +191,15 @@ class TpModelWorker:
                 self.max_total_num_tokens,
                 self.max_prefill_tokens,
                 self.max_running_requests,
+                self.max_queued_requests,
                 self.max_req_len,
                 self.max_req_input_len,
                 self.random_seed,
                 self.device,
                 global_server_args_dict,
+                self.model_runner.mm_embedding_allocator.size,
                 None,
-                None,
-                None,
+                self.model_runner.mm_embedding_pool.size,
                 # self.model_runner.mm_embedding_pool.available_size(),
                 # self.model_runner.mm_embedding_pool.used_size,
             )

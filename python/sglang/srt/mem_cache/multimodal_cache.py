@@ -1,13 +1,11 @@
 import abc
-from collections import Counter
+from collections import Counter, OrderedDict
 from typing import Dict, List, Optional, Tuple
 
 import torch
 
-# Set up logging for cache behavior
-logger = logging.getLogger(__name__)
-
 from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
+from sglang.utils import logger
 
 
 class MultimodalCache(abc.ABC):
@@ -117,6 +115,27 @@ class MultiModalStaticCache(MultimodalCache):
         combined_hash = self.combine_hashes(mm_hashes)
         # MultiModalStaticCache does not fallback to individual item lookup
         return self.mm_cache.get(combined_hash)
+
+    def _get_tensor_size(self, embedding: torch.Tensor):
+        return embedding.element_size() * embedding.numel()
+
+    def _allocate(self, embedding_size: int) -> bool:
+        """Allocate space by evicting least recently used entries"""
+        evictions = 0
+        while self.current_size + embedding_size > self.max_size and self.mm_cache:
+            _, old_embedding = self.mm_cache.popitem(last=False)
+            evicted_size = self._get_tensor_size(old_embedding)
+            self.current_size -= evicted_size
+            evictions += evicted_size
+
+        if evictions > 0:
+            logger.debug(
+                f"Cache eviction: evicted {evictions} bytes, remaining size: {self.current_size}/{self.max_size} bytes"
+            )
+
+        if self.current_size + embedding_size > self.max_size:
+            return False
+        return True
 
     def set_mm_embedding(
         self, mm_hash: int, embedding: torch.Tensor, loc: Optional[torch.Tensor] = None

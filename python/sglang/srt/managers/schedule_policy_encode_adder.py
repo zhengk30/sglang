@@ -1,11 +1,7 @@
 from contextlib import contextmanager
 
 from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
-from sglang.srt.managers.schedule_policy import (
-    CLIP_MAX_NEW_TOKENS_ESTIMATION,
-    IGNORE_EOS_RESERVE_TOKENS,
-    AddReqResult,
-)
+from sglang.srt.managers.schedule_policy import CLIP_MAX_NEW_TOKENS, AddReqResult
 from sglang.srt.mem_cache.allocator import BaseTokenToKVPoolAllocator
 
 
@@ -48,7 +44,7 @@ class EncodeAdder:
                 [
                     min(
                         (r.sampling_params.max_new_tokens - len(r.output_ids)),
-                        CLIP_MAX_NEW_TOKENS_ESTIMATION,
+                        CLIP_MAX_NEW_TOKENS,
                     )
                     * self.new_token_ratio
                     for r in running_batch.reqs
@@ -221,7 +217,7 @@ class EncodeAdder:
             input_tokens,
             # min(
             #     req.sampling_params.max_new_tokens,
-            #     CLIP_MAX_NEW_TOKENS_ESTIMATION,
+            #     CLIP_MAX_NEW_TOKENS,
             # ),
         )
         # else:
