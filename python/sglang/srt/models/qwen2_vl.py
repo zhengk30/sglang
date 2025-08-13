@@ -42,6 +42,7 @@ from sglang.srt.layers.pooler import Pooler, PoolingType
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.vocab_parallel_embedding import ParallelLMHead
 from sglang.srt.managers.mm_utils import (
+    CudaTimer,
     MultiModalityDataPaddingPatternMultimodalTokens,
     general_mm_embed_routine,
 )
@@ -565,14 +566,24 @@ class Qwen2VLForConditionalGeneration(nn.Module):
                         "multimodal section rotary embedding requires "
                         f"(3, seq_len) positions, but got {positions.size()}"
                     )
-
-        hidden_states = general_mm_embed_routine(
-            input_ids=input_ids,
-            forward_batch=forward_batch,
-            language_model=self.model,
-            multimodal_model=self,
-            positions=positions,
-        )
+        if forward_batch.forward_mode.is_prefill():
+            print(f"{forward_batch.batch_size=}")
+            with CudaTimer(stream=torch.cuda.current_stream(), name="prefill"):
+                hidden_states = general_mm_embed_routine(
+                    input_ids=input_ids,
+                    forward_batch=forward_batch,
+                    language_model=self.model,
+                    multimodal_model=self,
+                    positions=positions,
+                )
+        else:
+            hidden_states = general_mm_embed_routine(
+                input_ids=input_ids,
+                forward_batch=forward_batch,
+                language_model=self.model,
+                multimodal_model=self,
+                positions=positions,
+            )
         if self.is_encoder:
             return hidden_states[0]
         elif get_embedding:

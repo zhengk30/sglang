@@ -1770,13 +1770,13 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 attention_backend_str
                 in [
                     "fa3",
-                     "flashinfer",
-                 "flashmla",
-                 "cutlass_mla",
-                 "ascend",
-                "trtllm_mha",
-                "aiter",
-            ]
+                    "flashinfer",
+                    "flashmla",
+                    "cutlass_mla",
+                    "ascend",
+                    "trtllm_mha",
+                    "aiter",
+                ]
                 or global_server_args_dict["enable_two_batch_overlap"]
             ):
                 seq_lens_cpu = (

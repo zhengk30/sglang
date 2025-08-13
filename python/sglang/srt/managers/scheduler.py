@@ -119,12 +119,12 @@ from sglang.srt.managers.schedule_policy import (
     PrefillAdder,
     SchedulePolicy,
 )
+from sglang.srt.managers.schedule_policy_encode_adder import EncodeAdder
 from sglang.srt.managers.scheduler_input_blocker import SchedulerInputBlocker
 from sglang.srt.managers.scheduler_metrics_mixin import (
     RECORD_STEP_TIME,
     SchedulerMetricsMixin,
 )
-from sglang.srt.managers.schedule_policy_encode_adder import EncodeAdder
 from sglang.srt.managers.scheduler_output_processor_mixin import (
     SchedulerOutputProcessorMixin,
 )
@@ -557,7 +557,6 @@ class Scheduler(
         # reqs whose required mm embedding has already been received
         self.embedding_received_queue: List[Req] = []
         self.recv_dp_balance_id_this_term = []
-
 
     def init_tokenizer(self):
         server_args = self.server_args

@@ -152,14 +152,15 @@ class TpModelWorker:
             self.max_queued_requests = server_args.max_queued_requests
         assert (
             self.max_running_requests > 0
-        ), "max_queued_requests is zero. We need to be at least 1 to schedule a request."self.max_req_len = min(
-                self.model_config.context_len - 1,
-                self.max_total_num_tokens - 1,
-            )
-            self.max_req_input_len = self.max_req_len - 5
-            assert (
-                self.max_req_len > 0 and self.max_req_input_len > 0
-            ), "Memory pool size is too small"
+        ), "max_queued_requests is zero. We need to be at least 1 to schedule a request."
+        self.max_req_len = min(
+            self.model_config.context_len - 1,
+            self.max_total_num_tokens - 1,
+        )
+        self.max_req_input_len = self.max_req_len - 5
+        assert (
+            self.max_req_len > 0 and self.max_req_input_len > 0
+        ), "Memory pool size is too small"
 
         # Sync random seed across TP workers
         self.random_seed = broadcast_pyobj(

@@ -1142,16 +1142,20 @@ def _execute_server_warmup(
                     headers=headers,
                     timeout=1800,  # because of deep gemm precache is very long if not precache.
                 )
-                if res.status_code == 200:logger.info(
-                    f"End of prefill disaggregation modewarmup with status {res.status_code}, resp: {res.json()}"
-                )_global_state.tokenizer_manager.server_status = ServerStatus.Up
-            else:
-                logger.info(
-                    "Prefill disaggregation mode warm Up Failed, status code: {}".format(
-                        res.status_code
+                if res.status_code == 200:
+                    logger.info(
+                        f"End of prefill disaggregation modewarmup with status {res.status_code}, resp: {res.json()}"
                     )
-                )
-                _global_state.tokenizer_manager.server_status = ServerStatus.UnHealthy
+                    _global_state.tokenizer_manager.server_status = ServerStatus.Up
+                else:
+                    logger.info(
+                        "Prefill disaggregation mode warm Up Failed, status code: {}".format(
+                            res.status_code
+                        )
+                    )
+                    _global_state.tokenizer_manager.server_status = (
+                        ServerStatus.UnHealthy
+                    )
 
     except Exception:
         last_traceback = get_exception_traceback()

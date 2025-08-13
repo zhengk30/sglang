@@ -168,18 +168,16 @@ def main():
     lb_args = LBArgs.from_cli_args(args)
 
     prefill_configs = [PrefillConfig(url, port) for url, port in lb_args.prefill_infos]
-    encode_configs = [
-            PrefillConfig(url, port) for url, port in lb_args.encode_infos
-        ]
+    encode_configs = [PrefillConfig(url, port) for url, port in lb_args.encode_infos]
 
-        run(
-            prefill_configs,
-            lb_args.decode_infos,
-            encode_configs,
-            lb_args.text_infos,
-            lb_args.host,
-            lb_args.port,
-        )
+    run(
+        prefill_configs,
+        lb_args.decode_infos,
+        encode_configs,
+        lb_args.text_infos,
+        lb_args.host,
+        lb_args.port,
+    )
 
 
 if __name__ == "__main__":
