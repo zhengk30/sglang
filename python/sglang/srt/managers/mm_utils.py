@@ -37,34 +37,6 @@ from sglang.utils import logger
 TensorTransportMode = Literal["cuda_ipc", "auto", "default"]
 
 
-class CudaTimer:
-    def __init__(self, stream=None, name=""):
-        self.stream = stream
-        self.name = name
-        self.start_event = torch.cuda.Event(enable_timing=True)
-        self.end_event = torch.cuda.Event(enable_timing=True)
-        self.start_time = None
-        self.end_time = None
-
-    def __enter__(self):
-        # 在进入时，在指定的 stream (或默认 stream) 上记录开始事件
-        self.start_event.record(self.stream)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # 在退出时，在同一个 stream 上记录结束事件
-        self.end_event.record(self.stream)
-        # 等待 stream 完成，以确保 end_event 被触发
-        if self.stream:
-            self.stream.synchronize()
-        else:
-            torch.cuda.synchronize()
-        # 计算时间
-        self.elapsed_time_ms = self.start_event.elapsed_time(self.end_event)
-        # 你可以在这里打印或存储时间
-        print(f"{self.name} Block executed in: {self.elapsed_time_ms:.3f} ms")
-
-
 class TransportProxyTensor(torch.Tensor):
     """
     A convenient torch.Tensor subclass that carries extra metadata and supports
@@ -432,14 +404,10 @@ def _get_chunked_prefill_embedding(
                 embedding_per_req = mm_embedding_pool.get_mm_embedding(
                     mm_hashes, combined_hash
                 )
-                # print(f"mm_utils 410 | {mm_hashes=} {combined_hash=}")
-                # print(f"{embedding_per_req.shape=}")
             else:
                 if disaggregation_mode != "encode" and disaggregation_mode != "null":
-                    print("NO!!!!!!!!!!!!!!!!!")
                     raise RuntimeError("Non-Encode should not call data_embedding_func")
-                with CudaTimer(stream=torch.cuda.current_stream(), name="vit"):
-                    embedding_per_req = data_embedding_func(embedding_items_per_req)
+                embedding_per_req = data_embedding_func(embedding_items_per_req)
                 if not embedding_cache.set_mm_embedding(
                     combined_hash, embedding_per_req, mm_embedding_allocator
                 ):
@@ -468,7 +436,6 @@ def _get_chunked_prefill_embedding(
             extend_seq_len=extend_length[i] if i < len(extend_length) else 0,
             items_offset=items_offset,
         )
-        # print(f"{embedding_per_req_chunk.shape=}")
         # remove this item from cache if chunk reaches to the end
         embedding_per_req_length = (
             embedding_per_req.shape[0]
@@ -667,7 +634,6 @@ def embed_mm_inputs(
                 disaggregation_mode=disaggregation_mode,
                 mm_embedding_allocator=mm_embedding_allocator,
             )
-            # print(f"{embedding.shape=}")
             embeddings += [embedding]
             masks += [mask]
 
@@ -697,11 +663,6 @@ def general_mm_embed_routine(
     forward_batch: ForwardBatch,
     language_model: nn.Module,
     positions: torch.Tensor,
-    # multimodal_model: Optional[nn.Module] = None,
-    # data_embedding_funcs: Dict[
-    #     Modality, Callable[[List[MultimodalDataItem]], torch.Tensor]
-    # ] = None,
-    # placeholder_tokens: Optional[dict[Modality, List[int]]] = None,
     **kwargs,
 ) -> torch.Tensor:
     """

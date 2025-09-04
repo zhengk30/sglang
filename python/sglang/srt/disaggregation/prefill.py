@@ -283,18 +283,13 @@ class MMEmbeddingTransferQueue:
     def __init__(
         self,
         gloo_group: ProcessGroup,
-        # req_to_metadata_buffer_idx_allocator: ReqToMetadataIdxAllocator,
         tp_rank: int,
-        # metadata_buffers: MetadataBuffers,
         scheduler: Scheduler,
     ):
         self.queue: List[EmbeddingRequest] = []
         self.gloo_group = gloo_group
-        # self.req_to_metadata_buffer_idx_allocator = req_to_metadata_buffer_idx_allocator
         self.tp_rank = tp_rank
-        # self.metadata_buffers = metadata_buffers
         self.scheduler = scheduler
-        # self.spec_algorithm = scheduler.spec_algorithm
 
     def add(self, prefill_req: EmbeddingRequest) -> None:
         self.queue.append(prefill_req)
@@ -333,48 +328,9 @@ class MMEmbeddingTransferQueue:
                 indices_to_remove.add(i)
                 continue
             elif poll == KVPoll.Success:
-
-                # idx = prefill_req.metadata_buffer_index
-                # (
-                #     output_id,
-                #     output_token_logprobs_val,
-                #     output_token_logprobs_idx,
-                #     output_top_logprobs_val,
-                #     output_top_logprobs_idx,
-                #     output_hidden_states,
-                # ) = self.metadata_buffers.get_buf(idx)
-
-                # prefill_req.req.output_ids.append(output_id[0].item())
-                # if prefill_req.req.return_logprob:
-                #     prefill_req.req.output_token_logprobs_val.append(
-                #         output_token_logprobs_val[0].item()
-                #     )
-                #     prefill_req.req.output_token_logprobs_idx.append(
-                #         output_token_logprobs_idx[0].item()
-                #     )
-                #     prefill_req.req.output_top_logprobs_val.append(
-                #         output_top_logprobs_val[
-                #         : prefill_req.req.top_logprobs_num
-                #         ].tolist()
-                #     )
-                #     prefill_req.req.output_top_logprobs_idx.append(
-                #         output_top_logprobs_idx[
-                #         : prefill_req.req.top_logprobs_num
-                #         ].tolist()
-                #     )
-
                 if hasattr(embedding_req.embedding_receiver, "clear"):
                     embedding_req.embedding_receiver.clear()
 
-                # special handling for sampling_params.max_new_tokens == 1
-                # if embedding_req.sampling_params.max_new_tokens == 1:
-                #     # finish immediately
-                #     embedding_req.check_finished()
-                #     self.scheduler.stream_output(
-                #         [embedding_req], embedding_req.return_logprob
-                #     )
-                # else:
-                #     transferred_reqs.append(embedding_req)
                 transferred_reqs.append(embedding_req.req)
 
                 indices_to_remove.add(i)
@@ -386,11 +342,6 @@ class MMEmbeddingTransferQueue:
                 pass
             else:
                 raise ValueError(f"Unexpected poll case: {poll}")
-
-        # for i in indices_to_remove:
-        #     idx = self.queue[i].metadata_buffer_index
-        #     assert idx != -1
-        #     self.req_to_metadata_buffer_idx_allocator.free(idx)
 
         self.queue = [
             entry for i, entry in enumerate(self.queue) if i not in indices_to_remove
@@ -408,8 +359,6 @@ class MMEmbeddingPreallocQueue:
         self,
         mm_embedding_pool: PagedMultiModalEmbeddingPool,
         token_to_kv_pool_allocator: BaseTokenToKVPoolAllocator,
-        # req_to_metadata_buffer_idx_allocator: ReqToMetadataIdxAllocator,
-        # metadata_buffers: MetadataBuffers,
         scheduler: Scheduler,
         transfer_queue: MMEmbeddingTransferQueue,
         gloo_group: ProcessGroup,
@@ -420,17 +369,11 @@ class MMEmbeddingPreallocQueue:
         max_total_num_tokens: int,
         pp_rank: int,
         pp_size: int,
-        # prefill_pp_size: int,
-        # num_reserved_decode_tokens: int,
         transfer_backend: TransferBackend,
         tp_rank: Optional[int] = 0,
     ):
         self.mm_embedding_pool = mm_embedding_pool
         self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
-        # self.token_to_kv_pool = token_to_kv_pool_allocator.get_kvcache()
-        # self.is_mla_backend = is_mla_backend(self.token_to_kv_pool)
-        # self.metadata_buffers = metadata_buffers
-        # self.req_to_metadata_buffer_idx_allocator = req_to_metadata_buffer_idx_allocator
         self.scheduler = scheduler
         self.transfer_queue = transfer_queue
         self.gloo_group = gloo_group
@@ -442,7 +385,6 @@ class MMEmbeddingPreallocQueue:
         self.gpu_id = gpu_id
         self.bootstrap_port = bootstrap_port
         self.max_total_num_tokens = max_total_num_tokens
-        # self.prefill_pp_size = prefill_pp_size
         self.transfer_backend = transfer_backend
         # Queue for requests pending pre-allocation
         self.queue: List[EmbeddingRequest] = []
@@ -454,15 +396,7 @@ class MMEmbeddingPreallocQueue:
         ...
         kv_args_class = get_kv_class(self.transfer_backend, KVClassType.KVARGS)
         kv_args = kv_args_class()
-        #
-        # attn_tp_size = self.tp_size // self.dp_size
         kv_args.engine_rank = self.tp_rank
-        # kv_args.decode_tp_size = attn_tp_size
-        # kv_args.prefill_pp_size = self.prefill_pp_size
-        # kv_data_ptrs, kv_data_lens, kv_item_lens = (
-        #     self.token_to_kv_pool.get_contiguous_buf_infos()
-        # )
-        #
         kv_data_ptrs, kv_data_lens, kv_item_lens = (
             self.mm_embedding_pool.get_mm_buffer_info()
         )
@@ -480,11 +414,7 @@ class MMEmbeddingPreallocQueue:
             if self.scheduler.server_args.enable_dp_attention
             else self.scheduler.server_args.dp_size
         )
-        #
-        # kv_args.aux_data_ptrs, kv_args.aux_data_lens, kv_args.aux_item_lens = (
-        #     self.metadata_buffers.get_buf_infos()
-        # )
-        #
+
         kv_args.ib_device = self.scheduler.server_args.disaggregation_ib_device
         kv_args.gpu_id = self.scheduler.gpu_id
         kv_manager_class = get_kv_class(self.transfer_backend, KVClassType.MANAGER)
@@ -529,12 +459,7 @@ class MMEmbeddingPreallocQueue:
 
     def _check_if_req_exceed_mm_pool_capacity(self, req: Req) -> bool:
         # TODO:
-        # if len(req.origin_input_ids) > self.max_total_num_tokens:
-        #     message = f"Request {req.rid} exceeds the maximum number of tokens: {len(req.origin_input_ids)} > {self.max_total_num_tokens}"
-        #     logger.error(message)
-        #     prepare_abort(req, message)
-        #     self.scheduler.stream_output([req], req.return_logprob)
-        #     return True
+
         return False
 
     def extend(self, reqs: List[Req]) -> None:
@@ -544,7 +469,6 @@ class MMEmbeddingPreallocQueue:
 
     def resume_retracted_reqs(self) -> List[Req]:
         # TODO refactor the scheduling part, reuse with the unified engine logic as much as possible
-        # print(f"resume_retracted_reqs...")
         # allocate memory
         resumed_reqs = []
         indices_to_remove = set()
@@ -553,8 +477,6 @@ class MMEmbeddingPreallocQueue:
         for i, req in enumerate(self.retracted_queue):
             if self.mm_embedding_pool.available_size() <= 0:
                 break
-
-            # print(f"{req=}")
 
             required_tokens_for_request = sum(req.mm_embedding_lens)
             if required_tokens_for_request > allocatable_tokens:
@@ -565,9 +487,6 @@ class MMEmbeddingPreallocQueue:
             req.is_retracted = False
             self._pre_alloc(req)
             allocatable_tokens -= required_tokens_for_request
-
-            # load from cpu, release the cpu copy
-            # req.load_kv_cache(self.mm_embedding_pool, self.token_to_kv_pool_allocator)
 
         self.retracted_queue = [
             entry
@@ -590,7 +509,6 @@ class MMEmbeddingPreallocQueue:
         )
 
         for i, (encode_req, poll) in enumerate(zip(self.queue, polls)):
-            # print(f"{poll=}")
             if poll == KVPoll.Bootstrapping:
                 pass
             elif poll == KVPoll.WaitingForInput:
@@ -637,9 +555,6 @@ class MMEmbeddingPreallocQueue:
             if self.mm_embedding_pool.available_size() <= 0:
                 break
 
-            # if self.req_to_metadata_buffer_idx_allocator.available_size() <= 0:
-            #     break
-
             # Memory estimation: don't add if the projected memory cannot be met
             # TODO: add new_token ratio
             required_tokens_for_request = sum(encode_req.req.mm_embedding_lens)
@@ -654,15 +569,6 @@ class MMEmbeddingPreallocQueue:
 
             logger.debug(f"{encode_req.req.mm_hashes=}")
 
-            # mm_embedding_indices = [self.mm_embedding_pool.get_embedding_locs_from_hash(mm_hash) for mm_hash in
-            #                         encode_req.req.mm_hashes]
-
-            # print(f"{mm_embedding_indices=}")
-
-            # prefill_req.metadata_buffer_index = (
-            #     self.req_to_metadata_buffer_idx_allocator.alloc()
-            # )
-            # assert prefill_req.metadata_buffer_index is not None
             page_indices = kv_to_page_indices(mm_embedding_indices, page_size=1)
             encode_req.embedding_receiver.init(page_indices, -1)
             preallocated_reqs.append(encode_req)
@@ -686,20 +592,7 @@ class MMEmbeddingPreallocQueue:
     def _pre_alloc(self, req: Req) -> List[torch.Tensor]:
         """Pre-allocate the memory for req_to_token and token_kv_pool"""
         logger.debug(f"pre_allocating...")
-        # req_pool_indices = self.mm_embedding_pool.alloc(1)
 
-        # assert (
-        #     req_pool_indices is not None
-        # ), "req_pool_indices is full! There is a bug in memory estimation."
-        #
-        # req.req_pool_idx = req_pool_indices[0]
-
-        # if self.token_to_kv_pool_allocator.page_size == 1:
-        #     raise NotImplementedError()
-        #     # kv_loc = self.token_to_kv_pool_allocator.alloc(
-        #     #     len(req.origin_input_ids) + max(len(req.output_ids) - 1, 0)
-        #     # )
-        # else:
         mm_hash = MultimodalCache.combine_hashes(
             [item.hash for item in req.multimodal_inputs.mm_items]
         )
@@ -707,22 +600,9 @@ class MMEmbeddingPreallocQueue:
             mm_embedding_len for mm_embedding_len in req.mm_embedding_lens
         )
 
-        # print(f"prefill 699 | {mm_hash=}")
-        # print(f"prefill 701 | {mm_embedding_lens=}")
-
         embedding_locs = self.mm_embedding_pool.reserve_mm_embedding(
             mm_hash, mm_embedding_lens, self.token_to_kv_pool_allocator
         )
-
-        # assert (
-        #     kv_loc is not None
-        # ), "KV cache is full! There is a bug in memory estimation."
-
-        # self.mm_embedding_pool.write((req.req_pool_idx, slice(0, len(kv_loc))), kv_loc)
-
-        # populate metadata
-        # req.fill_ids = req.origin_input_ids + req.output_ids
-        # req.extend_input_len = len(req.origin_input_ids)
 
         return embedding_locs
 
@@ -740,7 +620,6 @@ class SchedulerDisaggregationPrefillMixin:
         # Poll for bootstrapped requests and add to the bootstrapped_queue
         bootstrapped, _failed = self.disagg_prefill_bootstrap_queue.pop_bootstrapped()
         if bootstrapped:
-            # print(f"{bootstrapped}")
             # Find requests that are already in the embedding_received_queue
             embedding_received_rooms = {
                 req.bootstrap_room for req in self.embedding_received_queue
@@ -751,8 +630,6 @@ class SchedulerDisaggregationPrefillMixin:
                 if req.bootstrap_room in embedding_received_rooms
             ]
 
-            # if ready_reqs:
-            #     print(f"{ready_reqs=}")
             # Add ready requests to the waiting_queue
             self.waiting_queue.extend(ready_reqs)
 
@@ -768,8 +645,6 @@ class SchedulerDisaggregationPrefillMixin:
             self.bootstrapped_queue.extend(
                 req for req in bootstrapped if req.bootstrap_room not in ready_rooms
             )
-            # if self.bootstrapped_queue:
-            #     print(f"{self.bootstrapped_queue=}")
 
     @torch.no_grad()
     def event_loop_normal_disagg_prefill(self: Scheduler) -> None:
@@ -1135,11 +1010,6 @@ class SchedulerDisaggregationPrefillMixin:
         process text-model prefill queue when encoder if disaggregated, dumping mm_received req to disagg_prefill_bootstrap_queue, waiting to be bootstrapped
         """
         # try to resume retracted requests if there are enough space for another `num_reserved_decode_tokens` decode steps
-        # resumed_reqs = self.disagg_prefill_prealloc_queue.resume_retracted_reqs()
-        # self.waiting_queue.extend(resumed_reqs)
-        # if len(self.disagg_prefill_prealloc_queue.retracted_queue) > 0:
-        #     if there are still retracted requests, we do not allocate new requests
-        #     return
 
         # the req whose embedding has been pre-allocated
         # TODO: this is time-consuming and foreground

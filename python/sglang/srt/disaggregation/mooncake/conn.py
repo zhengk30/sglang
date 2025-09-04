@@ -668,7 +668,6 @@ class MooncakeKVManager(BaseKVManager):
                     target_rank_registration_info: KVArgsRegisterInfo = (
                         self.decode_kv_args_table[req.mooncake_session_id]
                     )
-                    # print(target_rank_registration_info)
 
                     ret = self.send_embedding(
                         session_id=req.mooncake_session_id,
@@ -852,7 +851,6 @@ class MooncakeKVManager(BaseKVManager):
                 )
 
     def _bind_server_socket(self):
-        print(f"_bind_server_socket {self.local_ip=} {self.rank_port=}")
         self.server_socket.bind(format_tcp_address(self.local_ip, self.rank_port))
 
     def start_prefill_thread(self):
@@ -932,9 +930,6 @@ class MooncakeKVManager(BaseKVManager):
                         TransferInfo.from_zmq(waiting_req_bytes)
                     )
                     logger.debug(f"waiting_req_bytes {len(waiting_req_bytes[4])=}")
-                    # print(
-                    #     f"transfer_infos {room=} {mooncake_session_id=} {self.transfer_infos[room][mooncake_session_id]=}"
-                    # )
                     # NOTE: after bootstrapping we can mark the req as waiting for input
                     if len(self.transfer_infos[room]) == required_dst_info_num:
                         self.update_status(room, KVPoll.WaitingForInput)
@@ -1114,7 +1109,6 @@ class MooncakeKVManager(BaseKVManager):
         return self.request_status[bootstrap_room]
 
     def update_status(self, bootstrap_room: int, status: KVPoll):
-        # print(f"update status of {bootstrap_room=} with {status=}")
         if bootstrap_room not in self.request_status:
             self.request_status[bootstrap_room] = status
         else:
@@ -1150,10 +1144,6 @@ class MooncakeKVManager(BaseKVManager):
         bootstrap_server_url = f"{host}:{self.bootstrap_port}"
         url = f"http://{bootstrap_server_url}/route"
         role_str = self.disaggregation_mode.role_str
-        # payload = {
-        #     "role": role_str,
-        #     # "dp_size": self.dp_size,
-        # }
         payload = {
             "role": role_str,
             "attn_tp_size": self.attn_tp_size,
@@ -1169,7 +1159,6 @@ class MooncakeKVManager(BaseKVManager):
         }
 
         try:
-            print(f"registering to bootstrap with: {url=}")
             response = requests.put(url, json=payload, timeout=5)
             if response.status_code == 200:
                 logger.debug(f"{role_str} successfully registered to bootstrap server.")
@@ -1272,7 +1261,6 @@ class MooncakeKVSender(BaseKVSender):
     def poll(self) -> KVPoll:
         if self.conclude_state is None:
             status = self.kv_mgr.check_status(self.bootstrap_room)
-            # print(f"checked status of {self.bootstrap_room=} with result {status=}, {self.kv_mgr.request_status=}")
             if status in (KVPoll.Success, KVPoll.Failed):
                 self.conclude_state = status
             elif status == KVPoll.Bootstrapping:
@@ -1355,12 +1343,6 @@ class MooncakeKVReceiver(BaseKVReceiver):
         self.data_parallel_rank = data_parallel_rank
         self.disaggregation_mode = disaggregation_mode
 
-        # if self.disaggregation_mode == DisaggregationMode.PREFILL:
-        #     # FIXME
-        #     self.target_dp_group = 0
-        #     self.target_tp_rank = -1
-        #     self.target_tp_ranks = [0]
-        # elif self.disaggregation_mode == DisaggregationMode.DECODE:
         if self.bootstrap_addr not in self.kv_mgr.prefill_dp_size_table:
             (
                 self.prefill_attn_tp_size,
@@ -1513,7 +1495,6 @@ class MooncakeKVReceiver(BaseKVReceiver):
             response = requests.get(url, timeout=5)
             if response.status_code == 200:
                 bootstrap_info = response.json()
-                # print(f"{bootstrap_info=}")
                 return bootstrap_info
             else:
                 logger.error(
@@ -1550,9 +1531,7 @@ class MooncakeKVReceiver(BaseKVReceiver):
 
     def _register_kv_args(self):
         tp_rank = self.kv_mgr.kv_args.engine_rank
-        # tp_size = self.kv_mgr.tp_size // self.kv_mgr.dp_size
         dst_tp_rank = str(tp_rank).encode("ascii")
-        # dst_tp_size = str(tp_size).encode("ascii")
         dst_attn_tp_size = str(self.kv_mgr.attn_tp_size).encode("ascii")
 
         for bootstrap_info in self.bootstrap_infos:
@@ -1566,7 +1545,6 @@ class MooncakeKVReceiver(BaseKVReceiver):
                 # Note(shangming): No need to add pp rank here since pp is not supported on the decode side yet
                 tp_rank = self.kv_mgr.kv_args.engine_rank
                 kv_item_len = self.kv_mgr.kv_args.kv_item_lens[0]
-                # dst_tp_rank = str(tp_rank).encode("ascii")
                 dst_kv_item_len = str(kv_item_len).encode("ascii")
 
                 sock, lock = self._connect_to_bootstrap_server(bootstrap_info)
@@ -1592,11 +1570,7 @@ class MooncakeKVReceiver(BaseKVReceiver):
                 packed_kv_data_ptrs = b"".join(
                     struct.pack("Q", ptr) for ptr in self.kv_mgr.kv_args.kv_data_ptrs
                 )
-                # packed_aux_data_ptrs = b"".join(
-                #     struct.pack("Q", ptr) for ptr in self.kv_mgr.kv_args.aux_data_ptrs
-                # )
                 kv_item_len = self.kv_mgr.kv_args.kv_item_lens[0]
-                # print(f"{self.kv_mgr.kv_args.kv_data_ptrs=}, {kv_item_len=}")
                 dst_kv_item_len = str(kv_item_len).encode("ascii")
                 sock, lock = self._connect_to_bootstrap_server(bootstrap_info)
                 sock.send_multipart(
@@ -1734,7 +1708,6 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
         # Start bootstrap server
         self.thread = threading.Thread(target=self._run_server, daemon=True)
         self.run()
-        print(f"bootstrap server started at: {port}")
 
     def run(self):
         self.thread.start()
@@ -1748,7 +1721,6 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
 
     async def _handle_route(self, request: web.Request):
         method = request.method
-        print(f"handle route: {request=}")
         if method == "PUT":
             return await self._handle_route_put(request)
         elif method == "GET":
@@ -1781,11 +1753,8 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
             self.pp_size = pp_size
 
         if role == DisaggregationMode.PREFILL.role_str:
-            # tp_size = data["tp_size"]
-            # dp_size = data["dp_size"]
             rank_ip = data["rank_ip"]
             rank_port = int(data["rank_port"])
-            # engine_rank = int(data["engine_rank"])
 
             if self.attn_tp_size is None:
                 self.attn_tp_size = attn_tp_size
@@ -1817,26 +1786,11 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
                 f"Register prefill bootstrap: DP {dp_group} TP{attn_tp_rank} PP{pp_rank} with rank_ip: {rank_ip} and rank_port: {rank_port}"
             )
         elif role == DisaggregationMode.ENCODE.role_str:
-            # tp_size = data["tp_size"]
-            # dp_size = data["dp_size"]
-            # rank_ip = data["rank_ip"]
             rank_port = int(data["rank_port"])
-            # engine_rank = int(data["engine_rank"])
-
-            # if self.tp_size is None:
-            #     self.tp_size = tp_size
-
             if system_dp_size == 1:
                 dp_group = attn_dp_rank
             else:
                 dp_group = system_dp_rank
-
-            # tp_size_per_dp_rank = tp_size // dp_size
-            # if self.tp_size_per_dp_rank is None:
-            #     self.tp_size_per_dp_rank = tp_size_per_dp_rank
-
-            # dp_group = engine_rank // tp_size_per_dp_rank
-            # tp_rank_in_dp_group = engine_rank % tp_size_per_dp_rank
 
             # Add lock to make sure thread-safe
             async with self.lock:
@@ -1859,8 +1813,6 @@ class MooncakeKVBootstrapServer(BaseKVBootstrapServer):
         engine_rank = request.query.get("engine_rank")
         target_dp_group = request.query.get("target_dp_group")
         target_pp_rank = request.query.get("target_pp_rank")
-        # print(f"{engine_rank=}")
-        # print(f"{target_dp_group=}")
 
         if not engine_rank or not target_dp_group:
             return web.Response(text="Missing inputs for bootstrap server.", status=400)

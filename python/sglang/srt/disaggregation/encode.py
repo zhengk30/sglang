@@ -66,9 +66,6 @@ class EncodeBootstrapQueue:
     def __init__(
         self,
         mm_embedding_pool: PagedMultiModalEmbeddingPool,
-        # draft_mm_embedding_pool: Optional[PagedMultiModalCache],
-        # req_to_metadata_buffer_idx_allocator: ReqToMetadataIdxAllocator,
-        # metadata_buffers: EncoderMetadataBuffers,
         gpu_id: int,
         bootstrap_port: int,
         gloo_group: ProcessGroup,
@@ -78,9 +75,6 @@ class EncodeBootstrapQueue:
         transfer_backend: TransferBackend,
     ):
         self.mm_embedding_pool = mm_embedding_pool
-        # self.draft_mm_embedding_pool = draft_mm_embedding_pool
-        # self.metadata_buffers = metadata_buffers
-        # self.req_to_metadata_buffer_idx_allocator = req_to_metadata_buffer_idx_allocator
         self.encode_dp_size = encode_dp_size
         self.gpu_id = gpu_id
         self.bootstrap_port = bootstrap_port
@@ -93,7 +87,6 @@ class EncodeBootstrapQueue:
         self.kv_manager = self._init_kv_manager()
 
     def _init_kv_manager(self) -> BaseKVManager:
-        print(f"initializing kv manager")
         # TODO
         kv_args_class = get_kv_class(self.transfer_backend, KVClassType.KVARGS)
         kv_args = kv_args_class()
@@ -117,11 +110,6 @@ class EncodeBootstrapQueue:
         kv_args.pp_rank = self.scheduler.pp_rank
         kv_args.pp_size = self.scheduler.pp_size
 
-        # kv_args.page_size = self.mm_embedding_pool.page_size
-        #
-        # kv_args.aux_data_ptrs, kv_args.aux_data_lens, kv_args.aux_item_lens = (
-        #     self.metadata_buffers.get_buf_infos()
-        # )
         kv_args.ib_device = self.scheduler.server_args.disaggregation_ib_device
         kv_args.gpu_id = self.scheduler.gpu_id
         kv_manager_class = get_kv_class(self.transfer_backend, KVClassType.MANAGER)
@@ -161,7 +149,6 @@ class EncodeBootstrapQueue:
             message = f"Request {req.rid} exceeds the maximum number of tokens: {len(req.origin_input_ids)} > {self.max_total_num_tokens}"
             logger.error(message)
             prepare_abort(req, message)
-            # self.scheduler.stream_output([req], req.return_logprob)
             return True
         return False
 
@@ -202,7 +189,6 @@ class EncodeBootstrapQueue:
                     continue
                 # Either waiting for input or failed
                 assert poll == KVPoll.WaitingForInput or poll == KVPoll.Failed
-            # print(f"{req=} {poll=}")
             if poll == KVPoll.Bootstrapping:
                 continue
             elif poll == KVPoll.Failed:
@@ -225,7 +211,6 @@ class EncodeBootstrapQueue:
             num_kv_indices = len(req.origin_input_ids)
             assert req.metadata_buffer_index is not None
 
-            # num_pages = kv_to_page_num(num_kv_indices, self.mm_embedding_pool.page_size)
             num_pages = -1
             req.disagg_kv_sender.init(num_pages, req.metadata_buffer_index)
             bootstrapped_reqs.append(req)
@@ -237,7 +222,6 @@ class EncodeBootstrapQueue:
             if i not in indices_to_remove
         ]
 
-        # print(f"{len(bootstrapped_reqs)=}")
         if not return_failed_reqs:
             return bootstrapped_reqs, []
         else:
@@ -279,8 +263,6 @@ class SchedulerDisaggregationEncodeMixin:
             self.running_batch,
             self.new_token_ratio,
             self.max_prefill_tokens,
-            # self.chunked_prefill_size,
-            # running_bs if self.is_mixed_chunk else 0,
         )
 
         # Get requests from the waiting queue to a new encode batch
@@ -343,12 +325,6 @@ class SchedulerDisaggregationEncodeMixin:
             device=self.device,
         )
 
-        # Encode mode doesn't use hierarchical cache
-        # if self.enable_hierarchical_cache:
-        #     new_batch.hicache_consumer_index = (
-        #         self.tree_cache.ready_to_load_host_cache()
-        #     )
-
         # Prepare the batch for extend mode (encode is similar to extend)
         new_batch.prepare_for_extend(should_set_req_pool_indices=False)
 
@@ -369,9 +345,6 @@ class SchedulerDisaggregationEncodeMixin:
         self.last_input_throughput = self.last_encode_tokens / gap_latency
         self.last_encode_tokens = adder.log_input_tokens
 
-        # num_used, token_usage, _, _ = self._get_token_info()
-        # token_msg = f"token usage: {token_usage:.2f}, "
-
         num_new_seq = len(can_run_list)
         f = (
             f"Encode batch. "
@@ -387,8 +360,6 @@ class SchedulerDisaggregationEncodeMixin:
 
         if self.enable_metrics:
             self.stats.num_running_reqs = running_bs
-            # self.stats.num_used_tokens = num_used
-            # self.stats.token_usage = round(token_usage, 2)
             self.stats.num_queue_reqs = len(self.waiting_queue)
 
             total_queue_latency = 0
@@ -416,8 +387,6 @@ class SchedulerDisaggregationEncodeMixin:
 
             batch = self.get_new_batch_encode()
 
-            # if require_mlp_sync(self.server_args):
-            #     batch = self.prepare_mlp_sync_batch(batch)
             self.cur_batch = batch
 
             if batch:
@@ -427,7 +396,6 @@ class SchedulerDisaggregationEncodeMixin:
             self.process_disagg_encode_inflight_queue()
 
             if batch is None and len(self.disagg_encode_inflight_queue) == 0:
-                # self.check_memory()
                 self.new_token_ratio = self.init_new_token_ratio
                 self.maybe_sleep_on_idle()
 
@@ -474,7 +442,6 @@ class SchedulerDisaggregationEncodeMixin:
                 self.process_disagg_encode_inflight_queue()
 
             if batch is None and len(self.disagg_encode_inflight_queue) == 0:
-                # self.check_memory()
                 self.new_token_ratio = self.init_new_token_ratio
                 self.maybe_sleep_on_idle()
 
@@ -492,84 +459,15 @@ class SchedulerDisaggregationEncodeMixin:
         Transfer kv for prefill completed requests and add it into disagg_prefill_inflight_queue
         Adapted from process_batch_result_prefill
         """
-        # (
-        #     logits_output,
-        #     _next_token_ids,
-        #     extend_input_len_per_req,
-        #     extend_logprob_start_len_per_req,
-        # ) = (
-        #     result.logits_output,
-        #     result.next_token_ids,
-        #     result.extend_input_len_per_req,
-        #     result.extend_logprob_start_len_per_req,
-        # )
-
-        # logprob_pt = 0
-        # Transfer kv for prefill completed requests and add it into disagg_prefill_inflight_queue
         if self.enable_overlap:
             self.tp_worker.resolve_last_batch_result(launch_done)
-        #     raise NotImplementedError()
-        # wait
-        # else:
-        # _next_token_ids = result.next_token_ids.tolist()
-        # if batch.return_logprob:
-        #     if logits_output.next_token_logprobs is not None:
-        #         logits_output.next_token_logprobs = (
-        #             logits_output.next_token_logprobs.tolist()
-        #         )
-        #     if logits_output.input_token_logprobs is not None:
-        #         logits_output.input_token_logprobs = tuple(
-        #             logits_output.input_token_logprobs.tolist()
-        #         )
-
-        # hidden_state_offset = 0
-        # for i, (req, next_token_id) in enumerate(
-        #     zip(batch.reqs, _next_token_ids, strict=True)
-        # ):
-        #     req: Req
-        #     assert req.is_chunked <= 0
-        #     # There is no output_ids for prefill
-        #     req.output_ids.append(next_token_id)
-        #     self.tree_cache.cache_unfinished_req(req)  # update the tree and lock
-        #     self.disagg_encode_inflight_queue.append(req)
-        #     if logits_output.hidden_states is not None:
-        #         last_hidden_index = (
-        #             hidden_state_offset + extend_input_len_per_req[i] - 1
-        #         )
-        #         req.hidden_states_tensor = (
-        #             logits_output.hidden_states[last_hidden_index].cpu().clone()
-        #         )
-        #         hidden_state_offset += extend_input_len_per_req[i]
-        #     else:
-        #         req.hidden_states_tensor = None
-        #     if req.return_logprob:
-        #         assert extend_logprob_start_len_per_req is not None
-        #         assert extend_input_len_per_req is not None
-        #         extend_logprob_start_len = extend_logprob_start_len_per_req[i]
-        #         extend_input_len = extend_input_len_per_req[i]
-        #         num_input_logprobs = extend_input_len - extend_logprob_start_len
-        #         self.add_logprob_return_values(
-        #             i,
-        #             req,
-        #             logprob_pt,
-        #             _next_token_ids,
-        #             num_input_logprobs,
-        #             logits_output,
-        #         )
-        #         logprob_pt += num_input_logprobs
         # FIXME: manually set finish reason to let req response
 
-        # print("setting finish reason")
         for i, req in enumerate(batch.reqs):
             req.finished_reason = FINISH_LENGTH(length=0)
             self.disagg_encode_inflight_queue.append(req)
             self.send_embedding_chunk(req)
 
-        # for i, req in enumerate(batch.reqs):
-        #     self.mm_embedding_allocator.free(req.cu_mm_embedding_len)
-        # We need to remove the sync in the following function for overlap schedule.
-        # self.set_next_batch_sampling_info_done(batch)
-        # print(f"{batch.reqs=}")
         self.stream_output(batch.reqs, batch.return_logprob)
 
     def process_disagg_encode_inflight_queue(
@@ -581,7 +479,6 @@ class SchedulerDisaggregationEncodeMixin:
         """
         if len(self.disagg_encode_inflight_queue) == 0:
             return []
-        # print(f"process_disagg_encode_inflight_queue")
 
         done_reqs = []
 
@@ -611,7 +508,6 @@ class SchedulerDisaggregationEncodeMixin:
                     _loc = self.mm_embedding_pool.free(
                         mm_hash, self.mm_embedding_allocator
                     )
-                # self.tree_cache.cache_finished_req(req)  # unlock the tree
                 req.finished_reason = FINISH_LENGTH(length=0)
                 # FIXME: clean up req's data in transfer engine
                 if hasattr(req.disagg_kv_sender, "clear"):
@@ -631,7 +527,6 @@ class SchedulerDisaggregationEncodeMixin:
                     _loc = self.mm_embedding_pool.free(
                         mm_hash, self.mm_embedding_allocator
                     )
-                # self.tree_cache.cache_finished_req(req)  # unlock the tree
                 prepare_abort(
                     req, error_message, status_code=HTTPStatus.INTERNAL_SERVER_ERROR
                 )
@@ -640,16 +535,11 @@ class SchedulerDisaggregationEncodeMixin:
                 assert False, f"Unexpected polling state {poll=}"
 
         # Stream requests which have finished transfer
-        # print(f"streaming requests out")
         self.stream_output(
             done_reqs,
             any(req.return_logprob for req in done_reqs),
             None,
         )
-        # for req in done_reqs:
-        #     req: Req
-        # self.req_to_metadata_buffer_idx_allocator.free(req.metadata_buffer_index)
-        # req.metadata_buffer_index = -1
 
         self.disagg_encode_inflight_queue = undone_reqs
 
@@ -680,9 +570,6 @@ class SchedulerDisaggregationEncodeMixin:
         mm_hash = MultimodalCache.combine_hashes(
             [item.hash for item in req.multimodal_inputs.mm_items]
         )
-        # print(f"{mm_hash=}")
-        # print(f"{[item.hash for item in req.multimodal_inputs.mm_items]=}")
-        # mm_hash = req.multimodal_inputs.mm_items[0].hash
 
         mm_indices = (
             self.mm_embedding_pool.get_embedding_locs_from_hash(mm_hash).cpu().numpy()
