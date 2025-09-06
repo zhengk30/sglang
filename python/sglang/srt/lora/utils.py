@@ -13,6 +13,9 @@ class LoRABatchInfo:
     # Batch size
     bs: int
 
+    # The forward mode is decode mode.
+    is_decode: bool
+
     # Lengths of each sequence in shape (bs,)
     seg_lens: torch.Tensor
 
@@ -30,6 +33,12 @@ class LoRABatchInfo:
 
     # scaling of each lora adapter, in shape (lora_num,)
     scalings: torch.Tensor
+
+    # TODO: ADD COMMENTS! Maybe replace seg_lens, seg_indptr, etc.
+    index_map: torch.Tensor
+    chunk_to_weight: torch.Tensor
+    cu_chunk_lens: torch.Tensor
+    num_chunks: int
 
 
 class LoRAType(Enum):
