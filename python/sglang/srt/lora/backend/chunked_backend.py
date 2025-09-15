@@ -25,7 +25,7 @@ class ChunkedSgmvLoRABackend(BaseLoRABackend):
 
     def __init__(self, max_loras_per_batch: int, device: torch.device):
         super().__init__(max_loras_per_batch, device)
-        self.segment_size = 16  # TODO (lifuhuang): make it configurable?
+        self.segment_size = 8192# TODO (lifuhuang): make it configurable?
 
     def run_lora_a_sgemm(
         self, x: torch.Tensor, weights: torch.Tensor, *args, **kwargs

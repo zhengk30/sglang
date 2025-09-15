@@ -29,13 +29,14 @@ from sglang.srt.configs.load_config import LoadConfig
 from sglang.srt.hf_transformers_utils import AutoConfig
 from sglang.srt.lora.backend.base_backend import BaseLoRABackend
 from sglang.srt.lora.backend.chunked_backend import ChunkedSgmvLoRABackend
+from sglang.srt.lora.backend.chunked_backend_cuda import ChunkedSgmvLoRABackendCUDA
 from sglang.srt.lora.backend.triton_backend import TritonLoRABackend
 from sglang.srt.lora.lora_config import LoRAConfig
 from sglang.srt.model_loader.loader import DefaultModelLoader
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_BACKENDS = (TritonLoRABackend, ChunkedSgmvLoRABackend)
+SUPPORTED_BACKENDS = (TritonLoRABackend, ChunkedSgmvLoRABackend, ChunkedSgmvLoRABackendCUDA)
 
 
 class LoRALayer(nn.Module):

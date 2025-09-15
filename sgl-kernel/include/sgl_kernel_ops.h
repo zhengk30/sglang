@@ -769,3 +769,29 @@ void causal_conv1d_fwd(
     const std::optional<at::Tensor>& has_initial_state,
     bool silu_activation,
     int64_t pad_slot_id);
+
+/*
+ * From csrc/lora
+ */
+torch::Tensor chunked_sgmv_lora_shrink(
+    torch::Tensor x,
+    torch::Tensor weights,
+    torch::Tensor seg_indptr,
+    torch::Tensor weight_indices,
+    torch::Tensor lora_ranks,
+    torch::Tensor permutation,
+    int64_t num_segments,
+    int64_t num_slices);
+
+torch::Tensor chunked_sgmv_lora_expand(
+    torch::Tensor x,
+    torch::Tensor lora_weight_b,
+    torch::Tensor seg_indptr,
+    torch::Tensor weight_indices,
+    torch::Tensor lora_ranks,
+    torch::Tensor permutation,
+    torch::Tensor scalings,
+    torch::Tensor slice_offsets,
+    int64_t num_segments,
+    int64_t max_slice_size,
+    std::optional<torch::Tensor> base_output);

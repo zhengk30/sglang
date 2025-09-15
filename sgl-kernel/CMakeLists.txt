@@ -317,6 +317,9 @@ set(SOURCES
     "csrc/memory/store.cu"
     "csrc/kvcacheio/transfer.cu"
 
+    "csrc/lora/chunked_sgmv_shrink.cu"
+    "csrc/lora/chunked_sgmv_expand.cu"
+
     "csrc/speculative/eagle_utils.cu"
     "csrc/speculative/packbit.cu"
     "csrc/speculative/speculative_sampling.cu"

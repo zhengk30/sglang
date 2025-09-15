@@ -476,6 +476,21 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "bool silu_activation,"
       "int pad_slot_id) -> ()");
   m.impl("causal_conv1d_fwd", torch::kCUDA, &causal_conv1d_fwd);
+
+  /*
+   * From csrc/lora
+   */
+  m.def(
+      "chunked_sgmv_lora_shrink(Tensor x, Tensor weights, Tensor seg_indptr, "
+      "Tensor weight_indices, Tensor lora_ranks, Tensor permutation, "
+      "int num_segments, int num_slices) -> Tensor");
+  m.impl("chunked_sgmv_lora_shrink", torch::kCUDA, &chunked_sgmv_lora_shrink);
+
+  m.def(
+      "chunked_sgmv_lora_expand(Tensor x, Tensor lora_weight_b, Tensor seg_indptr, "
+      "Tensor weight_indices, Tensor lora_ranks, Tensor permutation, Tensor scalings, "
+      "Tensor slice_offsets, int num_segments, int max_slice_size, Tensor? base_output) -> Tensor");
+  m.impl("chunked_sgmv_lora_expand", torch::kCUDA, &chunked_sgmv_lora_expand);
 }
 
 REGISTER_EXTENSION(common_ops)

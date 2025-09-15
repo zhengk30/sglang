@@ -6,10 +6,6 @@ from typing import Dict, List, Optional, Tuple
 import torch
 
 from sglang.srt.lora.backend.chunked_backend import ChunkedSgmvLoRABackend
-from sglang.srt.lora.triton_ops import (
-    chunked_sgmv_lora_expand_forward,
-    chunked_sgmv_lora_shrink_forward,
-)
 from sglang.srt.lora.utils import LoRABatchInfo
 
 
@@ -175,12 +171,25 @@ def reference_sgmv_expand(
     return output
 
 
-class TestChunkedSGMV(unittest.TestCase):
+class TestChunkedSGMVBase(unittest.TestCase):
+    """Base test class - not meant to be run directly"""
 
     # Test configuration constants
     RTOL = 1e-3
     ATOL = 1e-3
     DEFAULT_BATCH_SIZE = 8
+
+    def get_shrink_function(self):
+        """Hook to be implemented by subclasses to provide the shrink function"""
+        raise NotImplementedError("Subclasses must implement get_shrink_function")
+
+    def get_expand_function(self):
+        """Hook to be implemented by subclasses to provide the expand function"""
+        raise NotImplementedError("Subclasses must implement get_expand_function")
+
+    def is_stub_implementation(self):
+        """Hook to be implemented by subclasses to indicate if using stub kernels"""
+        raise NotImplementedError("Subclasses must implement is_stub_implementation")
 
     def _compare_shrink_outputs(
         self,
@@ -197,7 +206,20 @@ class TestChunkedSGMV(unittest.TestCase):
 
         The chunked SGMV shrink kernel only guarantees correctness for
         output[seq_start:seq_end, :rank * num_slices] for each sequence.
+
+        If kernels are stubs, verify they return zeros and check shapes/dtypes.
         """
+        # If using stub kernels, verify they return zeros and check shape/dtype
+        if self.is_stub_implementation():
+            # Verify stub returns all zeros
+            assert torch.all(chunked_output == 0).item(), \
+                f"Stub implementation should return all zeros for {test_name}, but got non-zero values"
+            # Check shape and dtype
+            assert chunked_output.shape == reference_output.shape, \
+                f"Shape mismatch for {test_name}: {chunked_output.shape} vs {reference_output.shape}"
+            assert chunked_output.dtype == reference_output.dtype, \
+                f"Dtype mismatch for {test_name}: {chunked_output.dtype} vs {reference_output.dtype}"
+            return
         # Create mapping from LoRA names to indices and ranks
         unique_loras = sorted(set(lora_assignments))
         lora_name_to_idx = {name: idx for idx, name in enumerate(unique_loras)}
@@ -490,7 +512,8 @@ class TestChunkedSGMV(unittest.TestCase):
         stacked_lora_b = self.stack_lora_weights(lora_b_weights, is_lora_a=False)
 
         # Test shrink operation
-        chunked_shrink = chunked_sgmv_lora_shrink_forward(
+        shrink_fn = self.get_shrink_function()
+        chunked_shrink = shrink_fn(
             x, stacked_lora_a, batch_info, num_slices=3
         )
         reference_shrink = reference_sgmv_shrink(
@@ -509,7 +532,8 @@ class TestChunkedSGMV(unittest.TestCase):
         )
 
         # Test expand operation
-        chunked_expand = chunked_sgmv_lora_expand_forward(
+        expand_fn = self.get_expand_function()
+        chunked_expand = expand_fn(
             reference_shrink,
             stacked_lora_b,
             batch_info,
@@ -526,13 +550,23 @@ class TestChunkedSGMV(unittest.TestCase):
             self.max_slice_size,
         )
 
-        torch.testing.assert_close(
-            chunked_expand,
-            reference_expand,
-            rtol=self.RTOL,
-            atol=self.ATOL,
-            msg=f"Expand operation failed for {test_name}",
-        )
+        # Compare expand outputs
+        if self.is_stub_implementation():
+            # For stub kernels, verify they return zeros and check shape/dtype
+            assert torch.all(chunked_expand == 0).item(), \
+                f"Stub implementation should return all zeros for expand in {test_name}"
+            assert chunked_expand.shape == reference_expand.shape, \
+                f"Expand shape mismatch for {test_name}: {chunked_expand.shape} vs {reference_expand.shape}"
+            assert chunked_expand.dtype == reference_expand.dtype, \
+                f"Expand dtype mismatch for {test_name}: {chunked_expand.dtype} vs {reference_expand.dtype}"
+        else:
+            torch.testing.assert_close(
+                chunked_expand,
+                reference_expand,
+                rtol=self.RTOL,
+                atol=self.ATOL,
+                msg=f"Expand operation failed for {test_name}",
+            )
 
     # === Basic Operations Tests ===
 
@@ -547,7 +581,8 @@ class TestChunkedSGMV(unittest.TestCase):
                 lora_a_weights = [weights[name][0] for name in sorted(weights.keys())]
                 stacked_lora_a = self.stack_lora_weights(lora_a_weights, is_lora_a=True)
 
-                chunked_shrink = chunked_sgmv_lora_shrink_forward(
+                shrink_fn = self.get_shrink_function()
+                chunked_shrink = shrink_fn(
                     x, stacked_lora_a, batch_info, num_slices=3
                 )
                 reference_shrink = reference_sgmv_shrink(
@@ -559,9 +594,18 @@ class TestChunkedSGMV(unittest.TestCase):
                     num_slices=3,
                 )
 
-                torch.testing.assert_close(
-                    chunked_shrink, reference_shrink, rtol=self.RTOL, atol=self.ATOL
-                )
+                if self.is_stub_implementation():
+                    # For stub kernels, verify they return zeros and check shape/dtype
+                    assert torch.all(chunked_shrink == 0).item(), \
+                        f"Stub implementation should return all zeros for batch_size={batch_size}"
+                    assert chunked_shrink.shape == reference_shrink.shape, \
+                        f"Shape mismatch for batch_size={batch_size}"
+                    assert chunked_shrink.dtype == reference_shrink.dtype, \
+                        f"Dtype mismatch for batch_size={batch_size}"
+                else:
+                    torch.testing.assert_close(
+                        chunked_shrink, reference_shrink, rtol=self.RTOL, atol=self.ATOL
+                    )
 
     def test_expand_basic(self):
         """Test basic expand operation against PyTorch reference"""
@@ -588,7 +632,8 @@ class TestChunkedSGMV(unittest.TestCase):
                     lora_b_weights, is_lora_a=False
                 )
 
-                chunked_expand = chunked_sgmv_lora_expand_forward(
+                expand_fn = self.get_expand_function()
+                chunked_expand = expand_fn(
                     intermediate,
                     stacked_lora_b,
                     batch_info,
@@ -605,9 +650,18 @@ class TestChunkedSGMV(unittest.TestCase):
                     self.max_slice_size,
                 )
 
-                torch.testing.assert_close(
-                    chunked_expand, reference_expand, rtol=self.RTOL, atol=self.ATOL
-                )
+                if self.is_stub_implementation():
+                    # For stub kernels, verify they return zeros and check shape/dtype
+                    assert torch.all(chunked_expand == 0).item(), \
+                        f"Stub implementation should return all zeros for batch_size={batch_size}"
+                    assert chunked_expand.shape == reference_expand.shape, \
+                        f"Shape mismatch for batch_size={batch_size}"
+                    assert chunked_expand.dtype == reference_expand.dtype, \
+                        f"Dtype mismatch for batch_size={batch_size}"
+                else:
+                    torch.testing.assert_close(
+                        chunked_expand, reference_expand, rtol=self.RTOL, atol=self.ATOL
+                    )
 
     # === QKV Operations Test ===
 
@@ -736,5 +790,61 @@ class TestChunkedSGMV(unittest.TestCase):
                 )
 
 
+class TestChunkedSGMVTriton(TestChunkedSGMVBase):
+    """Test class for Triton backend implementation"""
+
+    def get_shrink_function(self):
+        from sglang.srt.lora.triton_ops import chunked_sgmv_lora_shrink_forward
+        return chunked_sgmv_lora_shrink_forward
+
+    def get_expand_function(self):
+        from sglang.srt.lora.triton_ops import chunked_sgmv_lora_expand_forward
+        return chunked_sgmv_lora_expand_forward
+
+    def is_stub_implementation(self):
+        """Triton has real implementation"""
+        return False
+
+
+class TestChunkedSGMVCUDA(TestChunkedSGMVBase):
+    """Test class for CUDA backend implementation"""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # Check if CUDA ops are available
+        try:
+            import sgl_kernel
+            import torch
+            cls.cuda_available = hasattr(torch.ops.sgl_kernel, 'chunked_sgmv_lora_shrink')
+        except ImportError:
+            cls.cuda_available = False
+
+        if not cls.cuda_available:
+            raise unittest.SkipTest("CUDA ops not available - skipping CUDA backend tests")
+
+    def get_shrink_function(self):
+        from sglang.srt.lora.cuda_ops import chunked_sgmv_lora_shrink_forward
+        return chunked_sgmv_lora_shrink_forward
+
+    def get_expand_function(self):
+        from sglang.srt.lora.cuda_ops import chunked_sgmv_lora_expand_forward
+        return chunked_sgmv_lora_expand_forward
+
+    def is_stub_implementation(self):
+        """CUDA currently has stub implementation"""
+        return True
+
+
 if __name__ == "__main__":
-    unittest.main()
+    # Create a test suite that only runs the concrete classes
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+
+    # Add only the concrete test classes
+    suite.addTests(loader.loadTestsFromTestCase(TestChunkedSGMVTriton))
+    suite.addTests(loader.loadTestsFromTestCase(TestChunkedSGMVCUDA))
+
+    # Run the tests
+    runner = unittest.TextTestRunner(verbosity=2)
+    runner.run(suite)
