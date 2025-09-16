@@ -18,7 +18,7 @@ import json
 import multiprocessing
 import os
 import time
-from typing import Tuple, List
+from typing import List, Tuple
 
 import requests
 
@@ -56,7 +56,6 @@ class BenchArgs:
     dataset_path: str = ""
     parallel_batch: bool = False
     dataset_name: str = ""
-
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser):
@@ -219,7 +218,12 @@ def run_one_case(
             output_dir = os.path.dirname(profile_filename_prefix)
             profile_name = os.path.basename(profile_filename_prefix)
         profile_link: str = run_profile(
-            url, profile_steps, ["CPU", "GPU"], output_dir, profile_name, profile_by_stage
+            url,
+            profile_steps,
+            ["CPU", "GPU"],
+            output_dir,
+            profile_name,
+            profile_by_stage,
         )
 
     tic = time.perf_counter()
@@ -234,7 +238,7 @@ def run_one_case(
         },
         "return_logprob": return_logprob,
         "stream": True,
-        **({"parallel_batch": parallel_batch} if parallel_batch else {})
+        **({"parallel_batch": parallel_batch} if parallel_batch else {}),
     }
     if dataset_name == "mmmu":
         # vlm
