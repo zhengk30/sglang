@@ -16,6 +16,7 @@ suites = {
     ],
     "per-commit-2-gpu": [
         TestFile("test_disaggregation.py", 499),
+        TestFile("test_dp_attention.py", 277),
     ],
     "per-commit-4-gpu": [
     ],
