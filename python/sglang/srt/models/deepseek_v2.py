@@ -203,7 +203,6 @@ class AttnForwardMethod(IntEnum):
 
     # Use absorbed multi-latent attention
     MLA = auto()
-
     # Use multi-head attention, but with KV cache chunked.
     # This method can avoid OOM when prefix lengths are long.
     MHA_CHUNKED_KV = auto()
