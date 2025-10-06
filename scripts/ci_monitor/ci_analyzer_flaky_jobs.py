@@ -9,6 +9,7 @@ import json
 import sys
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List
 
@@ -76,6 +77,40 @@ class FlakyJobAnalyzer:
             print(f"Warning: Could not fetch job details for run {run_id}: {e}")
             return []
 
+    def _fetch_all_job_details_parallel(
+        self, runs: List[Dict]
+    ) -> Dict[int, List[Dict]]:
+        """Fetch job details for all runs in parallel"""
+        print(f"Fetching job details for {len(runs)} runs in parallel...")
+
+        def fetch_job_details(run: Dict) -> tuple[int, List[Dict]]:
+            """Fetch job details for a single run"""
+            run_id = run.get("id")
+            jobs = self._get_job_details(run_id)
+            return run_id, jobs
+
+        results = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            # Submit all job detail requests
+            future_to_run = {
+                executor.submit(fetch_job_details, run): run for run in runs
+            }
+
+            # Collect results as they complete
+            completed = 0
+            total = len(runs)
+            for future in as_completed(future_to_run):
+                run_id, jobs = future.result()
+                results[run_id] = jobs
+                completed += 1
+
+                # Show progress every 10% or every 50 runs
+                if completed % max(1, min(50, total // 10)) == 0 or completed == total:
+                    progress = (completed / total) * 100
+                    print(f"Fetched job details: {completed}/{total} ({progress:.1f}%)")
+
+        return results
+
     def analyze_flaky_jobs(self, runs: List[Dict]) -> Dict:
         """Analyze jobs to find flaky patterns (fail then succeed on retry)"""
         print("Analyzing flaky job patterns...")
@@ -87,15 +122,19 @@ class FlakyJobAnalyzer:
             if sha:
                 runs_by_sha[sha].append(run)
 
+        # Fetch all job details in parallel
+        all_job_details = self._fetch_all_job_details_parallel(runs)
+
         # Track job outcomes per SHA
         job_outcomes_by_sha = defaultdict(lambda: defaultdict(list))
         job_run_info = defaultdict(lambda: defaultdict(list))
 
+        print("Processing run data...")
         total_runs = len(runs)
         for i, run in enumerate(runs, 1):
             if i % max(1, min(50, total_runs // 10)) == 0 or i == total_runs:
                 progress = (i / total_runs) * 100
-                print(f"Progress: {i}/{total_runs} ({progress:.1f}%)")
+                print(f"Processing: {i}/{total_runs} ({progress:.1f}%)")
 
             sha = run.get("head_sha")
             run_id = run.get("id")
@@ -104,7 +143,8 @@ class FlakyJobAnalyzer:
             created_at = run.get("created_at")
             run_url = f"https://github.com/{self.repo}/actions/runs/{run_id}"
 
-            jobs = self._get_job_details(run_id)
+            # Get detailed job information from pre-fetched data
+            jobs = all_job_details.get(run_id, [])
 
             for job in jobs:
                 job_name = job.get("name", "Unknown")
@@ -132,32 +172,33 @@ class FlakyJobAnalyzer:
                         }
                     )
 
-            time.sleep(0.1)
-
         # Find flaky jobs
         flaky_stats = {
-            "flaky_jobs": defaultdict(
-                lambda: {"flaky_count": 0, "total_count": 0, "examples": []}
-            ),
+            "flaky_jobs": {},
             "total_shas_analyzed": len(runs_by_sha),
         }
+
+        # Track all jobs with their flaky status
+        all_jobs = defaultdict(
+            lambda: {"flaky_count": 0, "total_count": 0, "examples": []}
+        )
 
         for sha, jobs_dict in job_outcomes_by_sha.items():
             for job_name, outcomes in jobs_dict.items():
                 # Track total runs (success + failure) for this job
-                flaky_stats["flaky_jobs"][job_name]["total_count"] += 1
+                all_jobs[job_name]["total_count"] += 1
 
                 # Check if this job has both failures and successes for the same SHA
                 has_failure = "failure" in outcomes
                 has_success = "success" in outcomes
 
                 if has_failure and has_success:
-                    flaky_stats["flaky_jobs"][job_name]["flaky_count"] += 1
+                    all_jobs[job_name]["flaky_count"] += 1
 
                     # Store example (limit to 5 per job)
-                    if len(flaky_stats["flaky_jobs"][job_name]["examples"]) < 5:
+                    if len(all_jobs[job_name]["examples"]) < 5:
                         run_infos = job_run_info[sha][job_name]
-                        flaky_stats["flaky_jobs"][job_name]["examples"].append(
+                        all_jobs[job_name]["examples"].append(
                             {
                                 "sha": sha,
                                 "outcomes": outcomes,
@@ -166,6 +207,33 @@ class FlakyJobAnalyzer:
                                 ),
                             }
                         )
+
+        # Only include jobs that have flaky runs
+        flaky_stats["flaky_jobs"] = {
+            job_name: data
+            for job_name, data in all_jobs.items()
+            if data["flaky_count"] > 0
+        }
+
+        # Print flaky jobs summary in the log
+        if flaky_stats["flaky_jobs"]:
+            print(f"\nDetected {len(flaky_stats['flaky_jobs'])} flaky jobs:")
+            sorted_flaky = sorted(
+                flaky_stats["flaky_jobs"].items(),
+                key=lambda x: x[1]["flaky_count"] / x[1]["total_count"],
+                reverse=True,
+            )
+            for job_name, data in sorted_flaky:
+                flaky_percentage = (
+                    (data["flaky_count"] / data["total_count"] * 100)
+                    if data["total_count"] > 0
+                    else 0
+                )
+                print(
+                    f"  - {job_name}: {data['flaky_count']}/{data['total_count']} commits ({flaky_percentage:.1f}%)"
+                )
+        else:
+            print("\nNo flaky jobs detected!")
 
         return flaky_stats
 
@@ -182,15 +250,12 @@ class FlakyJobAnalyzer:
             print("\nNo flaky jobs detected!")
             return
 
-        # Filter to only jobs that have flaky runs
-        flaky_only = {k: v for k, v in flaky_jobs.items() if v["flaky_count"] > 0}
-
-        print(f"\nFlaky Jobs Detected: {len(flaky_only)}")
+        print(f"\nFlaky Jobs Detected: {len(flaky_jobs)}")
         print("\nJobs that failed but succeeded on retry (sorted by flaky percentage):")
 
         # Sort by flakiness percentage
         sorted_flaky = sorted(
-            flaky_only.items(),
+            flaky_jobs.items(),
             key=lambda x: x[1]["flaky_count"] / x[1]["total_count"],
             reverse=True,
         )

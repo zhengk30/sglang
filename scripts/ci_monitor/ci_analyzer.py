@@ -10,6 +10,7 @@ import os
 import sys
 import time
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List
 
@@ -116,12 +117,16 @@ class SGLangCIAnalyzer:
             "job_last_success": {},  # Store last successful run for each job
         }
 
+        # Fetch all job details in parallel
+        all_job_details = self._fetch_all_job_details_parallel(runs)
+
+        print("Processing run data...")
         total_runs = len(runs)
         for i, run in enumerate(runs, 1):
             # Show progress every 10% or every 50 runs, whichever is smaller
             if i % max(1, min(50, total_runs // 10)) == 0 or i == total_runs:
                 progress = (i / total_runs) * 100
-                print(f"Progress: {i}/{total_runs} ({progress:.1f}%)")
+                print(f"Processing: {i}/{total_runs} ({progress:.1f}%)")
 
             run_status = run.get("conclusion", "unknown")
             workflow_name = run.get("name", "Unknown")
@@ -139,8 +144,8 @@ class SGLangCIAnalyzer:
             elif run_status == "skipped":
                 stats["skipped_runs"] += 1
 
-            # Get detailed job information for all runs
-            jobs = self._get_job_details(run_id)
+            # Get detailed job information from pre-fetched data
+            jobs = all_job_details.get(run_id, [])
             run_url = f"https://github.com/{self.repo}/actions/runs/{run_id}"
             pr_info = self._get_pr_info(run)
 
@@ -156,6 +161,8 @@ class SGLangCIAnalyzer:
                     "check-changes",
                     "pr-test-finish",
                     "pr-test-h20-finish",
+                    "bump-kernel-version",
+                    "bump-sglang-version",
                     "lint",
                 ]:
                     # Count this job run if the workflow run is not cancelled or skipped
@@ -164,8 +171,14 @@ class SGLangCIAnalyzer:
 
                     # Record successful jobs (update last success)
                     if job_conclusion == "success":
+                        job_id = job.get("id")
+                        job_url = (
+                            f"https://github.com/{self.repo}/actions/runs/{run_id}/job/{job_id}"
+                            if job_id
+                            else run_url
+                        )
                         stats["job_last_success"][job_name] = {
-                            "url": run_url,
+                            "url": job_url,
                             "run_number": run_number,
                             "created_at": created_at,
                             "pr_info": pr_info,
@@ -177,9 +190,15 @@ class SGLangCIAnalyzer:
 
                         # Store failure link (keep only last 3 for each job)
                         if len(stats["job_failure_links"][job_name]) < 3:
+                            job_id = job.get("id")
+                            job_url = (
+                                f"https://github.com/{self.repo}/actions/runs/{run_id}/job/{job_id}"
+                                if job_id
+                                else run_url
+                            )
                             stats["job_failure_links"][job_name].append(
                                 {
-                                    "url": run_url,
+                                    "url": job_url,
                                     "run_number": run_number,
                                     "created_at": created_at,
                                     "pr_info": pr_info,
@@ -197,8 +216,6 @@ class SGLangCIAnalyzer:
                         # Analyze failure patterns
                         self._analyze_failure_pattern(job, stats)
 
-            time.sleep(0.1)  # Avoid API rate limits
-
         return stats
 
     def _get_job_details(self, run_id: int) -> List[Dict]:
@@ -210,6 +227,40 @@ class SGLangCIAnalyzer:
             return response.json().get("jobs", [])
         except:
             return []
+
+    def _fetch_all_job_details_parallel(
+        self, runs: List[Dict]
+    ) -> Dict[int, List[Dict]]:
+        """Fetch job details for all runs in parallel"""
+        print(f"Fetching job details for {len(runs)} runs in parallel...")
+
+        def fetch_job_details(run: Dict) -> tuple[int, List[Dict]]:
+            """Fetch job details for a single run"""
+            run_id = run.get("id")
+            jobs = self._get_job_details(run_id)
+            return run_id, jobs
+
+        results = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            # Submit all job detail requests
+            future_to_run = {
+                executor.submit(fetch_job_details, run): run for run in runs
+            }
+
+            # Collect results as they complete
+            completed = 0
+            total = len(runs)
+            for future in as_completed(future_to_run):
+                run_id, jobs = future.result()
+                results[run_id] = jobs
+                completed += 1
+
+                # Show progress every 10% or every 50 runs
+                if completed % max(1, min(50, total // 10)) == 0 or completed == total:
+                    progress = (completed / total) * 100
+                    print(f"Fetched job details: {completed}/{total} ({progress:.1f}%)")
+
+        return results
 
     def _get_pr_info(self, run: Dict) -> Dict:
         """Get PR information from a run"""
@@ -312,12 +363,16 @@ class SGLangCIAnalyzer:
                     pr_info = last_success["pr_info"]
 
                     pr_text = ""
-                    if pr_info["pr_number"]:
-                        pr_text = (
-                            f" (PR #{pr_info['pr_number']} by {pr_info['author']})"
-                        )
+                    if pr_info["pr_number"] and pr_info["pr_number"] != 1:
+                        pr_text = f" (PR #{pr_info['pr_number']})"
                     else:
-                        pr_text = f" by {pr_info['author']}"
+                        # Show commit link instead of PR #1
+                        head_sha = pr_info.get("head_sha", "")
+                        if head_sha:
+                            commit_url = (
+                                f"https://github.com/{self.repo}/commit/{head_sha}"
+                            )
+                            pr_text = f" ({commit_url})"
 
                     print(
                         f"      Last Success: Run #{last_success['run_number']} ({success_date.strftime('%Y-%m-%d %H:%M')}){pr_text}: {last_success['url']}"
@@ -337,10 +392,16 @@ class SGLangCIAnalyzer:
                         # Format PR info for failures
                         pr_info = link_info.get("pr_info", {})
                         pr_text = ""
-                        if pr_info.get("pr_number"):
-                            pr_text = f" (PR #{pr_info['pr_number']} by {pr_info.get('author', 'Unknown')})"
+                        if pr_info.get("pr_number") and pr_info.get("pr_number") != 1:
+                            pr_text = f" (PR #{pr_info['pr_number']})"
                         else:
-                            pr_text = f" by {pr_info.get('author', 'Unknown')}"
+                            # Show commit link instead of PR #1
+                            head_sha = pr_info.get("head_sha", "")
+                            if head_sha:
+                                commit_url = (
+                                    f"https://github.com/{self.repo}/commit/{head_sha}"
+                                )
+                                pr_text = f" ({commit_url})"
 
                         print(
                             f"        - Run #{link_info['run_number']} ({created_at.strftime('%Y-%m-%d %H:%M')}){pr_text}: {link_info['url']}"
